@@ -1,0 +1,17 @@
+name: 'testing'
+files:
+  demand_file: 'output/demand_test.csv'
+  product_master_file: 'data/product_master.csv'
+  geo_file: 'data/zip3.csv'
+  origin_file: 'data/origin_fcs.csv'
+facing_fill_param: 0.90
+shipping: 
+  mode: 'Next Day'
+  time: "12:00:00"
+delivery_speed:
+  units: 'mph'
+  mean: 450
+  stdev: 100
+delivery_window:
+  start: "06:00:00"
+  end: "18:00:00"

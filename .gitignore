@@ -205,3 +205,25 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# BCC Custom
+./retiarius-private/*
+./retiarius-private
+
+# Node
+node_modules/
+
+# DuckDB database files
+*.duckdb
+*.duckdb.wal
+
+# Venv
+venv-3.13/
+
+# Generated data and output
+scimulator/output/
+scimulator/data/
+
+# OS
+.DS_Store
+*.png

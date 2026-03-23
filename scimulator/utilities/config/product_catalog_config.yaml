@@ -1,0 +1,12 @@
+name: "default"
+cnt_products: 1000
+length_pn: 4
+sum_units: 100000
+noise_factor: 0.0
+demand_curve_shape: "log-logistic"
+demand_curve_params:
+  k: 0.8
+  x0: 0.01
+qty_per_order_shape: "constant"
+qty_per_order_ratio: 1.0
+seed: 42

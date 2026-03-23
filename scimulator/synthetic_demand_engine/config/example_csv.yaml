@@ -1,0 +1,19 @@
+# CSV-Based Configuration Example
+# Products, geographic weights, and correlations are loaded from CSV files.
+# Only simulation parameters are specified here in YAML.
+
+start_date: "2024-01-01"
+end_date: "2024-12-31"
+frequency: "D"  # Daily data
+seed: 42
+output_format: "csv"
+
+# CSV input file paths (can also be passed via CLI --products-csv, etc.)
+products_csv: "~/Code/git/ai-sandbox/scimulator/data/product_demand.csv"
+geo_weights_csv: "~/Code/git/ai-sandbox/scimulator/data/geo_weights.csv"
+correlations_csv: "~/Code/git/ai-sandbox/scimulator/data/correlations.csv"
+
+metadata:
+  description: "CSV-driven demand simulation with geographic distribution"
+  author: "Demand Generation Engine"
+  version: "2.0"

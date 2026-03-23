@@ -1,0 +1,52 @@
+# Basic Configuration Example
+# Single product with daily seasonality and simple noise
+
+start_date: "2024-01-01"
+end_date: "2024-03-31"
+frequency: "H"  # Hourly data
+seed: 42
+output_format: "csv"
+
+metadata:
+  description: "Basic demand pattern with daily seasonality"
+  author: "Demand Generation Engine"
+  version: "1.0"
+
+products:
+  - product_id: "PRODUCT_001"
+    baseline_demand: 100.0
+    min_demand: 0.0
+    max_demand: 500.0
+
+    # Daily seasonality pattern
+    seasonality:
+      - type: "daily"
+        amplitude: 30.0
+        harmonics: 2
+        phase_shift: 0.0
+        enabled: true
+
+    # Linear growth trend
+    trend:
+      type: "linear"
+      coefficient: 0.05
+      enabled: true
+
+    # Gaussian noise
+    noise:
+      type: "gaussian"
+      mean: 0.0
+      std_dev: 10.0
+      enabled: true
+
+    # Occasional demand spikes
+    anomalies:
+      - type: "spike"
+        probability: 0.01
+        magnitude: 2.0
+        duration: 2
+        enabled: true
+
+    metadata:
+      category: "Electronics"
+      warehouse: "WEST-01"

@@ -1,0 +1,230 @@
+# Complex Configuration Example
+# Advanced scenario with all features: multiple seasonalities, trends, anomalies, correlations
+
+start_date: "2023-01-01"
+end_date: "2024-12-31"
+frequency: "H"
+seed: 2024
+output_format: "csv"
+
+metadata:
+  description: "Complex demand scenario with all features"
+  scenario: "E-commerce product suite"
+  industry: "Retail"
+  market: "North America"
+
+products:
+  # Flagship product with complex patterns
+  - product_id: "FLAGSHIP_001"
+    baseline_demand: 500.0
+    min_demand: 50.0
+    max_demand: 2000.0
+
+    # Multiple overlapping seasonalities
+    seasonality:
+      - type: "yearly"
+        amplitude: 150.0
+        harmonics: 2
+        phase_shift: 3.14159  # Peak mid-year
+        enabled: true
+      - type: "monthly"
+        amplitude: 80.0
+        harmonics: 3
+        enabled: true
+      - type: "weekly"
+        amplitude: 60.0
+        harmonics: 2
+        enabled: true
+      - type: "daily"
+        amplitude: 40.0
+        harmonics: 3
+        phase_shift: 1.57  # Peak afternoon
+        enabled: true
+
+    # Step trend with change points (product launches, marketing campaigns)
+    trend:
+      type: "step"
+      change_points:
+        - index: 2160   # 90 days * 24 hours
+          value: 50.0
+        - index: 4320   # 180 days * 24 hours
+          value: 100.0
+        - index: 6480   # 270 days * 24 hours
+          value: -30.0  # Competition impact
+      enabled: true
+
+    # Lognormal noise for realistic variability
+    noise:
+      type: "lognormal"
+      mean: 0.0
+      sigma: 0.3
+      enabled: true
+
+    # Multiple anomaly types
+    anomalies:
+      - type: "spike"
+        probability: 0.003
+        magnitude: 3.0
+        duration: 4
+        enabled: true
+      - type: "drop"
+        probability: 0.002
+        magnitude: 0.3
+        duration: 6
+        enabled: true
+      # Specific promotional events
+      - type: "spike"
+        locations: [720, 4320, 8640]  # Black Friday equivalent events
+        magnitude: 5.0
+        duration: 48
+        probability: 1.0
+        enabled: true
+
+    metadata:
+      category: "Consumer Electronics"
+      price_tier: "Premium"
+      warehouse: "CENTRAL-HQ"
+
+  # High-volume consumable
+  - product_id: "CONSUMABLE_001"
+    baseline_demand: 800.0
+    min_demand: 200.0
+    max_demand: 3000.0
+
+    seasonality:
+      - type: "weekly"
+        amplitude: 150.0
+        harmonics: 2
+        enabled: true
+      - type: "daily"
+        amplitude: 100.0
+        harmonics: 2
+        enabled: true
+
+    trend:
+      type: "polynomial"
+      coefficient: 0.0001
+      exponent: 1.5
+      enabled: true
+
+    noise:
+      type: "gaussian"
+      std_dev: 50.0
+      enabled: true
+
+    anomalies:
+      - type: "missing_data"
+        probability: 0.001
+        magnitude: 0.0
+        duration: 2
+        enabled: true
+
+    metadata:
+      category: "Consumables"
+      replenishment_cycle: "weekly"
+
+  # Seasonal product
+  - product_id: "SEASONAL_001"
+    baseline_demand: 150.0
+    min_demand: 0.0
+    max_demand: 1500.0
+
+    seasonality:
+      - type: "yearly"
+        amplitude: 400.0
+        harmonics: 1
+        phase_shift: 0.0  # Peak at start of year
+        enabled: true
+      - type: "weekly"
+        amplitude: 30.0
+        harmonics: 1
+        enabled: true
+
+    trend:
+      type: "linear"
+      coefficient: 0.02
+      enabled: true
+
+    noise:
+      type: "poisson"
+      lambda_param: 20.0
+      enabled: true
+
+    anomalies:
+      - type: "level_shift"
+        locations: [4380]  # Mid-year inventory adjustment
+        magnitude: -0.5
+        duration: 1
+        probability: 1.0
+        enabled: true
+
+    metadata:
+      category: "Seasonal Goods"
+      season: "Winter/Holiday"
+
+  # Budget alternative product
+  - product_id: "BUDGET_001"
+    baseline_demand: 300.0
+    min_demand: 50.0
+    max_demand: 1200.0
+
+    seasonality:
+      - type: "monthly"
+        amplitude: 50.0
+        harmonics: 2
+        enabled: true
+      - type: "weekly"
+        amplitude: 40.0
+        harmonics: 1
+        enabled: true
+
+    noise:
+      type: "uniform"
+      min_value: -30.0
+      max_value: 30.0
+      enabled: true
+
+    anomalies:
+      - type: "spike"
+        probability: 0.008
+        magnitude: 2.0
+        duration: 3
+        enabled: true
+
+    metadata:
+      category: "Consumer Electronics"
+      price_tier: "Budget"
+
+# Complex correlation network
+correlations:
+  # Flagship drives demand for consumables
+  - source_product: "FLAGSHIP_001"
+    target_product: "CONSUMABLE_001"
+    coefficient: 0.5
+    lag: 48  # 2-day lag for accessory purchases
+    type: "linear"
+    enabled: true
+
+  # Inverse correlation: flagship sales reduce budget alternative sales
+  - source_product: "FLAGSHIP_001"
+    target_product: "BUDGET_001"
+    coefficient: -0.3
+    lag: 0
+    type: "linear"
+    enabled: true
+
+  # Budget product slightly drives consumable demand
+  - source_product: "BUDGET_001"
+    target_product: "CONSUMABLE_001"
+    coefficient: 0.2
+    lag: 24
+    type: "linear"
+    enabled: true
+
+  # Seasonal product has exponential correlation with flagship (holiday bundles)
+  - source_product: "FLAGSHIP_001"
+    target_product: "SEASONAL_001"
+    coefficient: 0.15
+    lag: 0
+    type: "exponential"
+    enabled: true

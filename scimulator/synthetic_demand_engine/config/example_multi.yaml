@@ -1,0 +1,100 @@
+# Multi-Product Configuration Example
+# Multiple products with cross-product correlations
+
+start_date: "2024-01-01"
+end_date: "2024-06-30"
+frequency: "H"
+seed: 123
+output_format: "csv"
+
+metadata:
+  description: "Multi-product demand with correlations"
+  scenario: "Complementary products"
+
+products:
+  # Main product - drives demand for others
+  - product_id: "PRODUCT_A"
+    baseline_demand: 200.0
+    min_demand: 50.0
+    max_demand: 800.0
+
+    seasonality:
+      - type: "weekly"
+        amplitude: 50.0
+        harmonics: 3
+        enabled: true
+      - type: "daily"
+        amplitude: 30.0
+        harmonics: 2
+        enabled: true
+
+    trend:
+      type: "exponential"
+      coefficient: 0.0001
+      exponent: 1.002
+      enabled: true
+
+    noise:
+      type: "gaussian"
+      std_dev: 15.0
+      enabled: true
+
+    anomalies:
+      - type: "spike"
+        probability: 0.005
+        magnitude: 2.5
+        duration: 3
+        enabled: true
+
+  # Complementary product - correlated with Product A
+  - product_id: "PRODUCT_B"
+    baseline_demand: 80.0
+    min_demand: 10.0
+    max_demand: 400.0
+
+    seasonality:
+      - type: "weekly"
+        amplitude: 20.0
+        harmonics: 2
+        enabled: true
+
+    noise:
+      type: "gaussian"
+      std_dev: 8.0
+      enabled: true
+
+  # Accessory product - lagged correlation with Product A
+  - product_id: "PRODUCT_C"
+    baseline_demand: 50.0
+    min_demand: 5.0
+    max_demand: 250.0
+
+    seasonality:
+      - type: "daily"
+        amplitude: 10.0
+        harmonics: 1
+        enabled: true
+
+    noise:
+      type: "uniform"
+      min_value: -5.0
+      max_value: 5.0
+      enabled: true
+
+# Define cross-product correlations
+correlations:
+  # Product B demand increases when Product A demand increases
+  - source_product: "PRODUCT_A"
+    target_product: "PRODUCT_B"
+    coefficient: 0.4
+    lag: 0
+    type: "linear"
+    enabled: true
+
+  # Product C demand follows Product A with a 24-hour lag
+  - source_product: "PRODUCT_A"
+    target_product: "PRODUCT_C"
+    coefficient: 0.25
+    lag: 24
+    type: "linear"
+    enabled: true
