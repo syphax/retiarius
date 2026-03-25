@@ -155,6 +155,8 @@ class ScenarioConfig:
     # Dataset
     dataset_version_id: str = "v1"
     demand_csv: Optional[str] = None  # Path to demand CSV from demand engine
+    inbound_schedule_csv: Optional[str] = None  # Path to inbound schedule CSV
+    initial_inventory_csv: Optional[str] = None  # Path to initial inventory CSV
     inbound_schedule: List[InboundShipment] = field(default_factory=list)
     initial_inventory: List[InitialInventory] = field(default_factory=list)
 

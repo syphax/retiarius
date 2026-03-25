@@ -43,7 +43,8 @@ def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
         'scenario_id', 'name', 'description', 'currency_code', 'time_resolution',
         'start_date', 'end_date', 'warm_up_days', 'backorder_probability',
         'write_event_log', 'write_snapshots', 'snapshot_interval_days',
-        'dataset_version_id', 'demand_csv', 'params', 'notes',
+        'dataset_version_id', 'demand_csv', 'inbound_schedule_csv',
+        'initial_inventory_csv', 'params', 'notes',
         'product_set_id', 'supply_node_set_id', 'distribution_node_set_id',
         'demand_node_set_id', 'edge_set_id',
     }
@@ -267,6 +268,7 @@ def _load_demand(conn, config: ScenarioConfig):
 
 
 def _load_inbound_schedule(conn, config: ScenarioConfig):
+    # Load from inline YAML entries
     for i in config.inbound_schedule:
         conn.execute("""
             INSERT OR REPLACE INTO inbound_schedule VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -276,8 +278,35 @@ def _load_inbound_schedule(conn, config: ScenarioConfig):
             i.quantity, i.ship_date, i.arrival_date,
         ])
 
+    # Load from CSV if specified
+    if config.inbound_schedule_csv:
+        csv_path = Path(config.inbound_schedule_csv).expanduser()
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Inbound schedule CSV not found: {csv_path}")
+
+        df = pd.read_csv(csv_path)
+        logger.info(f"Loading {len(df)} inbound schedule rows from {csv_path}")
+
+        required_cols = {'inbound_id', 'supply_node_id', 'dest_node_id',
+                         'product_id', 'quantity', 'ship_date', 'arrival_date'}
+        missing = required_cols - set(df.columns)
+        if missing:
+            raise ValueError(f"Inbound schedule CSV missing columns: {missing}")
+
+        for _, row in df.iterrows():
+            conn.execute("""
+                INSERT OR REPLACE INTO inbound_schedule VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                config.dataset_version_id, str(row['inbound_id']),
+                row['supply_node_id'], row['dest_node_id'], row['product_id'],
+                float(row['quantity']), row['ship_date'], row['arrival_date'],
+            ])
+
+        logger.info(f"Loaded {len(df)} inbound schedule events for dataset {config.dataset_version_id}")
+
 
 def _load_initial_inventory(conn, config: ScenarioConfig):
+    # Load from inline YAML entries
     for inv in config.initial_inventory:
         conn.execute("""
             INSERT OR REPLACE INTO initial_inventory VALUES (?, ?, ?, ?, ?)
@@ -285,6 +314,34 @@ def _load_initial_inventory(conn, config: ScenarioConfig):
             config.dataset_version_id, inv.dist_node_id,
             inv.product_id, inv.inventory_state, inv.quantity,
         ])
+
+    # Load from CSV if specified
+    if config.initial_inventory_csv:
+        csv_path = Path(config.initial_inventory_csv).expanduser()
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Initial inventory CSV not found: {csv_path}")
+
+        df = pd.read_csv(csv_path)
+        logger.info(f"Loading {len(df)} initial inventory rows from {csv_path}")
+
+        required_cols = {'dist_node_id', 'product_id', 'quantity'}
+        missing = required_cols - set(df.columns)
+        if missing:
+            raise ValueError(f"Initial inventory CSV missing columns: {missing}")
+
+        # Default inventory_state to 'saleable' if not in CSV
+        if 'inventory_state' not in df.columns:
+            df['inventory_state'] = 'saleable'
+
+        for _, row in df.iterrows():
+            conn.execute("""
+                INSERT OR REPLACE INTO initial_inventory VALUES (?, ?, ?, ?, ?)
+            """, [
+                config.dataset_version_id, row['dist_node_id'],
+                row['product_id'], row['inventory_state'], float(row['quantity']),
+            ])
+
+        logger.info(f"Loaded {len(df)} initial inventory rows for dataset {config.dataset_version_id}")
 
 
 def _load_scenario(conn, config: ScenarioConfig):
