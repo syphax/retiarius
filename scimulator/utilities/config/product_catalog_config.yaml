@@ -1,5 +1,58 @@
-name: "default"
-cnt_products: 1000
+# Product Catalog Generator Configuration
+# =========================================
+# Used by: python -m scimulator.utilities.create_product_catalog [this_file]
+#
+# Parameters:
+#
+#   name                  — Catalog identifier. Output file is named
+#                           products-{name}.csv.
+#
+#   cnt_products          — Number of products (SKUs) to generate.
+#
+#   length_pn             — Character length of part numbers. Part numbers are
+#                           sequential alphabetic strings (e.g. length 4 → AAAA,
+#                           AAAB, ...). Max products = 26^length_pn.
+#
+#   sum_units             — Target total annual units across all products. The
+#                           demand curve distributes this total; actual output may
+#                           differ slightly due to noise and rounding.
+#
+#   noise_factor          — Controls random per-product demand variation. Each
+#                           product's demand is multiplied by (1 + noise_factor/2 * z)
+#                           where z ~ N(0,1). Set to 0.0 for a smooth curve.
+#                           Typical values: 0.0–0.5.
+#
+#   demand_curve_shape    — PDF used to distribute demand across products.
+#                           Supported values:
+#                             "log-logistic" — Long-tail; controlled by k and x0.
+#                             "lognormal"    — Long-tail; controlled by mu and sigma.
+#
+#   demand_curve_params   — Shape parameters for the chosen demand curve:
+#                           For "log-logistic":
+#                             k   — Shape parameter. Lower k → heavier tail
+#                                   (more demand concentrated in top products).
+#                                   Typical range: 0.5–2.0.
+#                             x0  — Scale (median) parameter. Controls where the
+#                                   peak of the PDF falls. Typical range: 0.005–0.1.
+#                           For "lognormal":
+#                             mu    — Mean of the underlying normal distribution
+#                                     (log-space). More negative → heavier tail.
+#                             sigma — Std dev of the underlying normal distribution
+#                                     (log-space). Larger → wider spread.
+#
+#   qty_per_order_shape   — Method for deriving order counts from unit demand.
+#                           Supported values:
+#                             "constant" — Each order contains a fixed number of
+#                                          units (orders = units / ratio, rounded).
+#
+#   qty_per_order_ratio   — Units per order when shape is "constant". E.g. 1.0
+#                           means one unit per order; 5.0 means five units per order.
+#
+#   seed                  — Random seed for reproducibility. Set to null for
+#                           non-deterministic output.
+
+name: "test_100"
+cnt_products: 100
 length_pn: 4
 sum_units: 100000
 noise_factor: 0.0

@@ -3,17 +3,17 @@
 # Only simulation parameters are specified here in YAML.
 
 start_date: "2026-01-01"
-end_date: "2026-12-31"
-frequency: "h"  # Daily data
+end_date: "2026-03-31"
+frequency: "D"  # Daily data
 seed: 42
 output_format: "csv"
 
 # CSV input file paths (can also be passed via CLI --products-csv, etc.)
-products_csv: "./scimulator/data/product_demand.csv"
-geo_weights_csv: "./scimulator/data/geo_weights.csv"
-correlations_csv: "./scimulator/data/correlations.csv"
+products_csv: "./scimulator/data/product_master_test_100.csv"
+geo_weights_csv: "./scimulator/data/zip3_weights_pop.csv"
+#correlations_csv: "./scimulator/data/correlations.csv"
 
 metadata:
-  description: "CSV-driven demand simulation with geographic distribution"
+  description: "Test demand for 2026Q1 for 100 products across all ZIP3 regions"
   author: "Demand Generation Engine"
   version: "2.0"

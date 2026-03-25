@@ -1,4 +1,33 @@
-"""Create an artificial product catalog with configurable demand distributions."""
+"""Create an artificial product catalog with configurable demand distributions.
+
+Usage:
+    python -m scimulator.utilities.create_product_catalog [config_path]
+
+    config_path : Optional path to a YAML config file. Defaults to
+                  scimulator/utilities/config/product_catalog_config.yaml.
+
+Output:
+    Writes a CSV to scimulator/utilities/output/products-{name}.csv with columns:
+        part_number   — Sequential alphabetic identifier (e.g. AAAA, AAAB, ...)
+        annual_units  — Simulated annual unit demand for this product
+        annual_orders — Simulated annual order count for this product
+
+    Products are sorted by descending demand (highest-demand product first),
+    following the shape of the configured demand curve. After writing, the script
+    prints summary statistics including demand concentration metrics (e.g. "top
+    10% of products account for X% of units").
+
+How it works:
+    1. Generates sequential part numbers of configurable length.
+    2. Distributes total annual units across products using a demand curve PDF
+       (log-logistic or lognormal), so a small number of products capture most
+       demand (long-tail distribution).
+    3. Optionally applies Gaussian noise to add per-product variation.
+    4. Derives order counts from unit demand using a configurable units-per-order
+       ratio.
+
+See config/product_catalog_config.yaml for parameter documentation.
+"""
 
 import argparse
 import csv

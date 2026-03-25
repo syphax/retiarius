@@ -1,8 +1,8 @@
 name: 'testing'
 files:
-  demand_file: 'output/demand_test.csv'
-  product_master_file: 'data/product_master.csv'
-  geo_file: 'data/zip3.csv'
+  demand_file: 'output/demand_test_100_90.csv'
+  product_master_file: 'data/product_master_test_100.csv'
+  geo_file: 'data/zip3_pop_2020.csv'
   origin_file: 'data/origin_fcs.csv'
 facing_fill_param: 0.90
 shipping: 
