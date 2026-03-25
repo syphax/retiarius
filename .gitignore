@@ -226,8 +226,12 @@ venv-3.13/
 # Generated data and output
 scimulator/output/
 scimulator/data/
+scimulator/utilities/output/*
+
+# Private repo
+/retiarius-private/
 
 # OS
 .DS_Store
 *.png
-scimulator/utilities/output/*
+

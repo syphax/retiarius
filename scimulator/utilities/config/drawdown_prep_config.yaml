@@ -53,11 +53,11 @@
 #   seed              — Random seed for reproducibility. Set to null for
 #                       non-deterministic output.
 
-name: "test_100"
-demand_file: "./scimulator/data/dmd_model_test_100.csv"
-node_file: "./scimulator/data/nodes_test_10.csv"
+name: "drawdown_test_2"
+demand_file: "./scimulator/data/dmd_drawdown_test_2_100.csv"
+node_file: "./scimulator/data/nodes_drawdown_test_2_10.csv"
 start_date: "2026-01-01"
-supply_node_id: "GENERIC_SUPPLY"
+supply_node_id: "SN_DOMESTIC_01"
 ship_lead_time: 0
 inventory_mos: 2
 inventory_mos_sd: 0.5

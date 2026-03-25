@@ -19,6 +19,7 @@ from .models import ScenarioConfig, SupplierConfig, SupplyNodeConfig
 from .models import DistributionNodeConfig, DemandNodeConfig, EdgeConfig
 from .models import ProductConfig, InboundShipment, InitialInventory
 from .db import create_database, open_database
+from .edge_builders import build_edges_from_zones
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,9 @@ def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
         'start_date', 'end_date', 'warm_up_days', 'backorder_probability',
         'write_event_log', 'write_snapshots', 'snapshot_interval_days',
         'dataset_version_id', 'demand_csv', 'inbound_schedule_csv',
-        'initial_inventory_csv', 'params', 'notes',
+        'initial_inventory_csv', 'distribution_nodes_csv',
+        'edge_csvs', 'zone_table_csv',
+        'params', 'notes',
         'product_set_id', 'supply_node_set_id', 'distribution_node_set_id',
         'demand_node_set_id', 'edge_set_id',
     }
@@ -79,10 +82,12 @@ def load_scenario_into_db(config: ScenarioConfig, db_path: str) -> duckdb.DuckDB
     _load_distribution_nodes(conn, config)
     _load_demand_nodes(conn, config)
     _load_edges(conn, config)
+    _load_zone_table(conn, config)
     _load_products(conn, config)
     _load_demand(conn, config)
     _load_inbound_schedule(conn, config)
     _load_initial_inventory(conn, config)
+    _build_generated_edges(conn, config)
     _load_scenario(conn, config)
 
     return conn
@@ -132,12 +137,58 @@ def _load_supply_nodes(conn, config: ScenarioConfig):
 
 
 def _load_distribution_nodes(conn, config: ScenarioConfig):
+    # Load from CSV if specified
+    if config.distribution_nodes_csv:
+        csv_path = Path(config.distribution_nodes_csv).expanduser()
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Distribution nodes CSV not found: {csv_path}")
+
+        df = pd.read_csv(csv_path)
+        logger.info(f"Loading {len(df)} distribution nodes from {csv_path}")
+
+        # Map common column names
+        if 'facility_code' in df.columns and 'dist_node_id' not in df.columns:
+            df['dist_node_id'] = df['facility_code']
+        if 'lat' in df.columns and 'latitude' not in df.columns:
+            df['latitude'] = df['lat']
+        if 'lng' in df.columns and 'longitude' not in df.columns:
+            df['longitude'] = df['lng']
+
+        if 'dist_node_id' not in df.columns:
+            raise ValueError("Distribution nodes CSV must have 'facility_code' or 'dist_node_id' column")
+
+        # Ensure zip3 is zero-padded string
+        if 'zip3' in df.columns:
+            df['zip3'] = df['zip3'].astype(str).str.zfill(3)
+
+        for _, row in df.iterrows():
+            conn.execute("""
+                INSERT OR REPLACE INTO distribution_node VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                row['dist_node_id'],
+                row.get('name', row['dist_node_id']),
+                float(row['latitude']) if pd.notna(row.get('latitude')) else None,
+                float(row['longitude']) if pd.notna(row.get('longitude')) else None,
+                row.get('zip3') if pd.notna(row.get('zip3')) else None,
+                None, 'm3',    # storage_capacity, storage_capacity_uom
+                None, None,    # max_inbound, max_inbound_uom
+                None, None,    # max_outbound, max_outbound_uom
+                1.0, 'days',   # order_response_time, order_response_time_uom
+                0.0, 'per_day',   # fixed_cost, fixed_cost_basis
+                0.0, 'per_unit',  # variable_cost, variable_cost_basis
+                None, None,    # overage_penalty, overage_penalty_basis
+            ])
+
+        logger.info(f"Loaded {len(df)} distribution nodes from {csv_path}")
+
+    # Load from inline YAML entries
     for dn in config.distribution_nodes:
         conn.execute("""
             INSERT OR REPLACE INTO distribution_node VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, [
-            dn.dist_node_id, dn.name, dn.latitude, dn.longitude,
+            dn.dist_node_id, dn.name, dn.latitude, dn.longitude, dn.zip3,
             dn.storage_capacity, dn.storage_capacity_uom,
             dn.max_inbound, dn.max_inbound_uom,
             dn.max_outbound, dn.max_outbound_uom,
@@ -161,6 +212,7 @@ def _load_demand_nodes(conn, config: ScenarioConfig):
 
 
 def _load_edges(conn, config: ScenarioConfig):
+    # Load from inline YAML entries
     for e in config.edges:
         conn.execute("""
             INSERT OR REPLACE INTO edge VALUES
@@ -175,6 +227,80 @@ def _load_edges(conn, config: ScenarioConfig):
             e.cost_fixed, e.cost_variable, e.cost_variable_basis,
             e.distance, e.distance_uom, e.distance_method,
         ])
+
+    # Load from edge CSVs
+    for csv_file in config.edge_csvs:
+        csv_path = Path(csv_file).expanduser()
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Edge CSV not found: {csv_path}")
+
+        df = pd.read_csv(csv_path)
+        logger.info(f"Loading {len(df)} edges from {csv_path}")
+
+        required_cols = {'edge_id', 'origin_node_id', 'origin_node_type',
+                         'dest_node_id', 'dest_node_type'}
+        missing = required_cols - set(df.columns)
+        if missing:
+            raise ValueError(f"Edge CSV {csv_path} missing columns: {missing}")
+
+        for _, row in df.iterrows():
+            conn.execute("""
+                INSERT OR REPLACE INTO edge VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                row['edge_id'], row['origin_node_id'], row['origin_node_type'],
+                row['dest_node_id'], row['dest_node_type'],
+                row.get('transport_type', 'parcel'),
+                float(row.get('mean_transit_time', 2.0)),
+                row.get('mean_transit_time_uom', 'days'),
+                row.get('transit_time_distribution', 'lognormal'),
+                row.get('transit_time_std') if pd.notna(row.get('transit_time_std')) else None,
+                row.get('transit_time_std_uom') if pd.notna(row.get('transit_time_std_uom')) else None,
+                row.get('transit_time_skew') if pd.notna(row.get('transit_time_skew')) else None,
+                float(row.get('cost_fixed', 0)),
+                float(row.get('cost_variable', 0)),
+                row.get('cost_variable_basis', 'per_unit'),
+                float(row['distance']) if pd.notna(row.get('distance')) else None,
+                row.get('distance_uom', 'km'),
+                row.get('distance_method') if pd.notna(row.get('distance_method')) else None,
+            ])
+
+        logger.info(f"Loaded {len(df)} edges from {csv_path}")
+
+
+def _load_zone_table(conn, config: ScenarioConfig):
+    """Load parcel zone table from CSV."""
+    if not config.zone_table_csv:
+        return
+
+    csv_path = Path(config.zone_table_csv).expanduser()
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Zone table CSV not found: {csv_path}")
+
+    df = pd.read_csv(csv_path)
+    logger.info(f"Loading {len(df)} zone table rows from {csv_path}")
+
+    required_cols = {'origin_zip3', 'dest_zip3'}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Zone table CSV missing columns: {missing}")
+
+    # Ensure zip3 columns are zero-padded strings
+    df['origin_zip3'] = df['origin_zip3'].astype(str).str.zfill(3)
+    df['dest_zip3'] = df['dest_zip3'].astype(str).str.zfill(3)
+
+    for _, row in df.iterrows():
+        conn.execute("""
+            INSERT OR REPLACE INTO zone_table VALUES (?, ?, ?, ?, ?, ?)
+        """, [
+            row['origin_zip3'], row['dest_zip3'],
+            str(row['zone']) if pd.notna(row.get('zone')) else None,
+            float(row['distance_haversine']) if pd.notna(row.get('distance_haversine')) else None,
+            row.get('distance_uom', 'km') if pd.notna(row.get('distance_uom')) else 'km',
+            float(row['transit_days_base']) if pd.notna(row.get('transit_days_base')) else None,
+        ])
+
+    logger.info(f"Loaded {len(df)} zone table entries")
 
 
 def _load_products(conn, config: ScenarioConfig):
@@ -342,6 +468,16 @@ def _load_initial_inventory(conn, config: ScenarioConfig):
             ])
 
         logger.info(f"Loaded {len(df)} initial inventory rows for dataset {config.dataset_version_id}")
+
+
+def _build_generated_edges(conn, config: ScenarioConfig):
+    """Run edge builders that generate edges from abstract relationships.
+
+    Currently supports zone-table-based edge generation. Future builders
+    (distance-based cost rules, LTL lane tables, etc.) plug in here.
+    """
+    if config.zone_table_csv:
+        build_edges_from_zones(conn)
 
 
 def _load_scenario(conn, config: ScenarioConfig):

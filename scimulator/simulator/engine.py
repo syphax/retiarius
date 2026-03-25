@@ -88,6 +88,9 @@ class DrawdownEngine:
         self._fulfillment_routes: Dict[str, List[Tuple[str, str, float]]] = {}
         # Maps demand_node_id -> [(dist_node_id, edge_id, variable_cost)] sorted by cost
 
+        # Zone lookup: edge_id -> zone (populated from zone_table for zone-derived edges)
+        self._edge_zones: Dict[str, str] = {}
+
     def run(self):
         """Execute the full simulation."""
         start_time = time.time()
@@ -229,6 +232,20 @@ class DrawdownEngine:
             self._fulfillment_routes[dest_id].append(
                 (origin_id, edge_id, float(cost_var or 0))
             )
+
+        # Pre-load zone data for zone-derived edges
+        zone_rows = self.conn.execute("""
+            SELECT e.edge_id, zt.zone
+            FROM edge e
+            JOIN distribution_node dn ON dn.dist_node_id = e.origin_node_id
+            JOIN demand_node dem ON dem.demand_node_id = e.dest_node_id
+            JOIN zone_table zt ON zt.origin_zip3 = dn.zip3 AND zt.dest_zip3 = dem.zip3
+            WHERE dn.zip3 IS NOT NULL AND dem.zip3 IS NOT NULL AND zt.zone IS NOT NULL
+        """).fetchall()
+        for edge_id, zone in zone_rows:
+            self._edge_zones[edge_id] = str(zone)
+        if self._edge_zones:
+            logger.info(f"Loaded zone data for {len(self._edge_zones)} edges")
 
         logger.info(f"Built fulfillment routes for {len(self._fulfillment_routes)} demand nodes")
 
@@ -467,16 +484,20 @@ class DrawdownEngine:
             cost = fulfill_qty * variable_cost
 
             event_type = 'backorder_fulfilled' if is_backorder else 'demand_fulfilled'
+            detail = {
+                'demand_node_id': demand_node_id,
+                'variable_cost_per_unit': variable_cost,
+            }
+            zone = self._edge_zones.get(edge_id)
+            if zone is not None:
+                detail['zone'] = zone
             self._log_event(sim_date, sim_step, event_type,
                             node_id=dist_node_id, node_type='distribution',
                             edge_id=edge_id, product_id=product_id,
                             quantity=fulfill_qty,
                             from_state='saleable', to_state='shipped',
                             demand_id=demand_id, cost=cost,
-                            detail=json.dumps({
-                                'demand_node_id': demand_node_id,
-                                'variable_cost_per_unit': variable_cost,
-                            }))
+                            detail=json.dumps(detail))
 
             total_fulfilled += fulfill_qty
             remaining -= fulfill_qty

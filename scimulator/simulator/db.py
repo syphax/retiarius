@@ -148,6 +148,7 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             name TEXT NOT NULL,
             latitude DECIMAL(9,6),
             longitude DECIMAL(9,6),
+            zip3 TEXT,
             storage_capacity DECIMAL(14,2),
             storage_capacity_uom TEXT DEFAULT 'm3',
             max_inbound DECIMAL(12,2),
@@ -340,18 +341,13 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS zone_table (
-            carrier TEXT NOT NULL,
-            service_level TEXT NOT NULL,
             origin_zip3 TEXT NOT NULL,
             dest_zip3 TEXT NOT NULL,
-            zone INTEGER NOT NULL,
-            transit_days DECIMAL(4,1) NOT NULL,
-            cost_per_weight DECIMAL(8,4),
-            cost_per_weight_uom TEXT,
-            cost_per_dimweight DECIMAL(8,4),
-            cost_per_dimweight_uom TEXT,
-            cost_base DECIMAL(8,4),
-            PRIMARY KEY (carrier, service_level, origin_zip3, dest_zip3)
+            zone TEXT,
+            distance_haversine DECIMAL(10,2),
+            distance_uom TEXT DEFAULT 'km',
+            transit_days_base DECIMAL(4,1),
+            PRIMARY KEY (origin_zip3, dest_zip3)
         )
     """)
 

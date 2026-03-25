@@ -1,0 +1,52 @@
+# Zone Table Generator Configuration
+# ====================================
+# Used by: python -m scimulator.utilities.create_zone_table [this_file]
+#
+# Parameters:
+#
+#   name                — Output identifier. Output file is named
+#                         zone_table-{name}.csv.
+#
+#   zip3_file           — Path to CSV with ZIP3 centroids. Must have columns:
+#                         zip3, latitude, longitude.
+#
+#   origin_zip3s        — List of ZIP3s to include as origins. If empty or
+#                         omitted, all ZIP3s in zip3_file are used.
+#
+#   dest_zip3s          — List of ZIP3s to include as destinations. If empty
+#                         or omitted, all ZIP3s in zip3_file are used.
+#
+#   distance_uom        — Unit of measure for mileage_breaks and output
+#                         distance. Supported: "km", "mi". Haversine is
+#                         computed in km internally and converted if needed.
+#
+#   avg_transit_speed   — Average transit speed used to compute transit days.
+#                         transit_days_base = ceil(distance / avg_transit_speed).
+#
+#   speed_uom           — Unit for avg_transit_speed. Must match distance_uom
+#                         per day (e.g. "km/day" or "mi/day").
+#
+#   mileage_breaks      — Dict mapping zone label to max distance (in
+#                         distance_uom). Distances are evaluated in order;
+#                         the first zone whose max >= distance is assigned.
+#
+#   seed                — Random seed (unused currently, reserved for future
+#                         stochastic extensions). Set to null.
+
+name: "test_10"
+zip3_file: './scimulator/data/zip3_pop_2020.csv'
+origin_zip3s: []  # empty = use node_file zip3s below
+dest_zip3s: []    # empty = all zip3s in zip3_file
+node_file: './scimulator/data/nodes_test_10.csv'
+distance_uom: "mi"
+avg_transit_speed: 500
+speed_uom: "mi/day"
+mileage_breaks:
+  "2": 150
+  "3": 300
+  "4": 600
+  "5": 1000
+  "6": 1400
+  "7": 1800
+  "8": 99999
+seed: null

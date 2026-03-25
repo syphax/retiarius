@@ -46,6 +46,7 @@ class DistributionNodeConfig:
     name: str
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    zip3: Optional[str] = None
     tags: List[str] = field(default_factory=list)
     storage_capacity: Optional[float] = None
     storage_capacity_uom: str = "m3"
@@ -157,6 +158,9 @@ class ScenarioConfig:
     demand_csv: Optional[str] = None  # Path to demand CSV from demand engine
     inbound_schedule_csv: Optional[str] = None  # Path to inbound schedule CSV
     initial_inventory_csv: Optional[str] = None  # Path to initial inventory CSV
+    distribution_nodes_csv: Optional[str] = None  # Path to distribution nodes CSV
+    edge_csvs: List[str] = field(default_factory=list)  # Paths to edge CSVs
+    zone_table_csv: Optional[str] = None  # Path to zone table CSV
     inbound_schedule: List[InboundShipment] = field(default_factory=list)
     initial_inventory: List[InitialInventory] = field(default_factory=list)
 
