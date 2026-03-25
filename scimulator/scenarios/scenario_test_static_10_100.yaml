@@ -1,0 +1,419 @@
+# Sample Drawdown Scenario
+# 1 supplier
+# 10 nodes
+# 100 products
+# All ZIP3s
+
+scenario_id: "Drawdown Test 2"
+name: "Sample Drawdown - Q1 2026"
+description: "Phase 1 test: drawdown with pre-loaded inventory and scheduled inbound shipments"
+currency_code: "USD"
+time_resolution: "daily"
+start_date: "2026-01-01"
+end_date: "2026-03-31"
+warm_up_days: 0
+backorder_probability: 0.8
+write_event_log: true
+write_snapshots: true
+snapshot_interval_days: 7
+dataset_version_id: "sample_v1"
+demand_csv: "scimulator/data/scimulator/data/dmd_model_test_100.csv"
+
+suppliers:
+  - supplier_id: "SUP_DOMESTIC"
+    name: "Domestic Supplier"
+    default_lead_time: 1.0
+    default_qty_reliability: 1.0
+
+supply_nodes:
+  - supply_node_id: "SN_DOMESTIC_01"
+    supplier_id: "SUP_DOMESTIC"
+    name: "Domestic Factory"
+    latitude: 40.0
+    longitude: -82.5
+    tags: ["domestic"]
+    products: []
+    
+distribution_nodes:
+  - dist_node_id: "DC_EAST"
+    name: "East Coast DC - Cranbury NJ"
+    latitude: 40.31
+    longitude: -74.51
+    tags: ["national_dc", "east"]
+    storage_capacity: 50000.0
+    storage_capacity_uom: "m3"
+    max_outbound: 500.0
+    max_outbound_uom: "unit"
+    order_response_time: 1.0
+    fixed_cost: 2500.0
+    fixed_cost_basis: "per_day"
+    variable_cost: 1.50
+    variable_cost_basis: "per_unit"
+
+  - dist_node_id: "DC_WEST"
+    name: "West Coast DC - Reno NV"
+    latitude: 39.53
+    longitude: -119.81
+    tags: ["national_dc", "west"]
+    storage_capacity: 30000.0
+    storage_capacity_uom: "m3"
+    max_outbound: 300.0
+    max_outbound_uom: "unit"
+    order_response_time: 1.0
+    fixed_cost: 2000.0
+    fixed_cost_basis: "per_day"
+    variable_cost: 1.50
+    variable_cost_basis: "per_unit"
+
+# Demand nodes are auto-created from the demand CSV zip3 values.
+# But we define a few manually for edges:
+demand_nodes: []
+
+# Edges: supply -> DC, DC -> demand
+# Supply to DC edges
+edges:
+  # Domestic supplier to both DCs
+  - edge_id: "E_DOM_EAST"
+    origin_node_id: "SN_DOMESTIC_01"
+    origin_node_type: "supply"
+    dest_node_id: "DC_EAST"
+    dest_node_type: "distribution"
+    transport_type: "tl"
+    mean_transit_time: 2.0
+    cost_fixed: 500.0
+    cost_variable: 0.10
+    cost_variable_basis: "per_unit"
+
+  - edge_id: "E_DOM_WEST"
+    origin_node_id: "SN_DOMESTIC_01"
+    origin_node_type: "supply"
+    dest_node_id: "DC_WEST"
+    dest_node_type: "distribution"
+    transport_type: "tl"
+    mean_transit_time: 4.0
+    cost_fixed: 800.0
+    cost_variable: 0.15
+    cost_variable_basis: "per_unit"
+
+  # Asia supplier to East DC (ocean)
+  - edge_id: "E_ASIA_EAST"
+    origin_node_id: "SN_ASIA_01"
+    origin_node_type: "supply"
+    dest_node_id: "DC_EAST"
+    dest_node_type: "distribution"
+    transport_type: "ocean_dray"
+    mean_transit_time: 28.0
+    cost_fixed: 2000.0
+    cost_variable: 0.05
+    cost_variable_basis: "per_unit"
+
+  # DC East -> demand nodes (parcel to eastern ZIP3s)
+  - edge_id: "E_EAST_Z100"
+    origin_node_id: "DC_EAST"
+    origin_node_type: "distribution"
+    dest_node_id: "Z100"
+    dest_node_type: "demand"
+    transport_type: "parcel"
+    mean_transit_time: 2.0
+    cost_variable: 5.50
+    cost_variable_basis: "per_unit"
+
+  - edge_id: "E_EAST_Z101"
+    origin_node_id: "DC_EAST"
+    origin_node_type: "distribution"
+    dest_node_id: "Z101"
+    dest_node_type: "demand"
+    transport_type: "parcel"
+    mean_transit_time: 2.0
+    cost_variable: 5.50
+    cost_variable_basis: "per_unit"
+
+  - edge_id: "E_EAST_Z200"
+    origin_node_id: "DC_EAST"
+    origin_node_type: "distribution"
+    dest_node_id: "Z200"
+    dest_node_type: "demand"
+    transport_type: "parcel"
+    mean_transit_time: 2.5
+    cost_variable: 6.00
+    cost_variable_basis: "per_unit"
+
+  - edge_id: "E_EAST_Z300"
+    origin_node_id: "DC_EAST"
+    origin_node_type: "distribution"
+    dest_node_id: "Z300"
+    dest_node_type: "demand"
+    transport_type: "parcel"
+    mean_transit_time: 3.0
+    cost_variable: 7.00
+    cost_variable_basis: "per_unit"
+
+  - edge_id: "E_EAST_Z303"
+    origin_node_id: "DC_EAST"
+    origin_node_type: "distribution"
+    dest_node_id: "Z303"
+    dest_node_type: "demand"
+    transport_type: "parcel"
+    mean_transit_time: 3.0
+    cost_variable: 7.00
+    cost_variable_basis: "per_unit"
+
+  - edge_id: "E_EAST_Z606"
+    origin_node_id: "DC_EAST"
+    origin_node_type: "distribution"
+    dest_node_id: "Z606"
+    dest_node_type: "demand"
+    transport_type: "parcel"
+    mean_transit_time: 3.5
+    cost_variable: 8.00
+    cost_variable_basis: "per_unit"
+
+  - edge_id: "E_EAST_Z750"
+    origin_node_id: "DC_EAST"
+    origin_node_type: "distribution"
+    dest_node_id: "Z750"
+    dest_node_type: "demand"
+    transport_type: "parcel"
+    mean_transit_time: 4.0
+    cost_variable: 9.00
+    cost_variable_basis: "per_unit"
+
+  # DC West -> demand nodes (parcel to western ZIP3s, also covers some central/east at higher cost)
+  - edge_id: "E_WEST_Z900"
+    origin_node_id: "DC_WEST"
+    origin_node_type: "distribution"
+    dest_node_id: "Z900"
+    dest_node_type: "demand"
+    transport_type: "parcel"
+    mean_transit_time: 2.0
+    cost_variable: 5.00
+    cost_variable_basis: "per_unit"
+
+  - edge_id: "E_WEST_Z941"
+    origin_node_id: "DC_WEST"
+    origin_node_type: "distribution"
+    dest_node_id: "Z941"
+    dest_node_type: "demand"
+    transport_type: "parcel"
+    mean_transit_time: 2.5
+    cost_variable: 5.50
+    cost_variable_basis: "per_unit"
+
+  - edge_id: "E_WEST_Z981"
+    origin_node_id: "DC_WEST"
+    origin_node_type: "distribution"
+    dest_node_id: "Z981"
+    dest_node_type: "demand"
+    transport_type: "parcel"
+    mean_transit_time: 2.0
+    cost_variable: 5.00
+    cost_variable_basis: "per_unit"
+
+  - edge_id: "E_WEST_Z606"
+    origin_node_id: "DC_WEST"
+    origin_node_type: "distribution"
+    dest_node_id: "Z606"
+    dest_node_type: "demand"
+    transport_type: "parcel"
+    mean_transit_time: 3.0
+    cost_variable: 7.50
+    cost_variable_basis: "per_unit"
+
+  - edge_id: "E_WEST_Z750"
+    origin_node_id: "DC_WEST"
+    origin_node_type: "distribution"
+    dest_node_id: "Z750"
+    dest_node_type: "demand"
+    transport_type: "parcel"
+    mean_transit_time: 3.5
+    cost_variable: 8.50
+    cost_variable_basis: "per_unit"
+
+products:
+  - product_id: "A"
+    name: "Product A - High Volume Widget"
+    standard_cost: 10.0
+    base_price: 20.0
+    weight: 10.0
+    cube: 2.0
+    attributes:
+      brand: "Generic"
+      category: "Cat1"
+
+  - product_id: "B"
+    name: "Product B - Mid Volume Gadget"
+    standard_cost: 1.0
+    base_price: 2.0
+    weight: 5.0
+    cube: 1.0
+    attributes:
+      brand: "Generic"
+      category: "Cat1"
+
+  - product_id: "C"
+    name: "Product C - Low Volume Premium"
+    standard_cost: 20.0
+    base_price: 50.0
+    weight: 1.0
+    cube: 0.5
+    attributes:
+      brand: "Generic"
+      category: "Cat2"
+
+  - product_id: "D"
+    name: "Product D - Mid Volume Accessory"
+    standard_cost: 2.0
+    base_price: 4.0
+    weight: 2.0
+    cube: 1.0
+    attributes:
+      brand: "Generic"
+      category: "Cat2"
+
+# Pre-loaded starting inventory (enough for ~30-45 days at expected demand rates)
+# Annual demand: A=5000, B=2000, C=150, D=800
+# Daily: A~14, B~5.5, C~0.4, D~2.2
+# 45 days: A~630, B~250, C~18, D~100
+initial_inventory:
+  # DC East gets more inventory (serves more demand nodes)
+  - dist_node_id: "DC_EAST"
+    product_id: "A"
+    inventory_state: "saleable"
+    quantity: 400
+
+  - dist_node_id: "DC_EAST"
+    product_id: "B"
+    inventory_state: "saleable"
+    quantity: 160
+
+  - dist_node_id: "DC_EAST"
+    product_id: "C"
+    inventory_state: "saleable"
+    quantity: 15
+
+  - dist_node_id: "DC_EAST"
+    product_id: "D"
+    inventory_state: "saleable"
+    quantity: 65
+
+  # DC West
+  - dist_node_id: "DC_WEST"
+    product_id: "A"
+    inventory_state: "saleable"
+    quantity: 250
+
+  - dist_node_id: "DC_WEST"
+    product_id: "B"
+    inventory_state: "saleable"
+    quantity: 100
+
+  - dist_node_id: "DC_WEST"
+    product_id: "C"
+    inventory_state: "saleable"
+    quantity: 8
+
+  - dist_node_id: "DC_WEST"
+    product_id: "D"
+    inventory_state: "saleable"
+    quantity: 40
+
+# Scheduled inbound shipments (replenishment arriving at known dates)
+inbound_schedule:
+  # Domestic supplier ships to DC East at day 30 and 60
+  - inbound_id: "INB_001"
+    supply_node_id: "SN_DOMESTIC_01"
+    dest_node_id: "DC_EAST"
+    product_id: "A"
+    quantity: 300
+    ship_date: "2024-01-28"
+    arrival_date: "2024-01-31"
+
+  - inbound_id: "INB_002"
+    supply_node_id: "SN_DOMESTIC_01"
+    dest_node_id: "DC_EAST"
+    product_id: "B"
+    quantity: 120
+    ship_date: "2024-01-28"
+    arrival_date: "2024-01-31"
+
+  - inbound_id: "INB_003"
+    supply_node_id: "SN_DOMESTIC_01"
+    dest_node_id: "DC_EAST"
+    product_id: "D"
+    quantity: 50
+    ship_date: "2024-01-28"
+    arrival_date: "2024-01-31"
+
+  - inbound_id: "INB_004"
+    supply_node_id: "SN_DOMESTIC_01"
+    dest_node_id: "DC_WEST"
+    product_id: "A"
+    quantity: 200
+    ship_date: "2024-01-28"
+    arrival_date: "2024-02-01"
+
+  - inbound_id: "INB_005"
+    supply_node_id: "SN_DOMESTIC_01"
+    dest_node_id: "DC_WEST"
+    product_id: "B"
+    quantity: 80
+    ship_date: "2024-01-28"
+    arrival_date: "2024-02-01"
+
+  # Second wave at day 60
+  - inbound_id: "INB_006"
+    supply_node_id: "SN_DOMESTIC_01"
+    dest_node_id: "DC_EAST"
+    product_id: "A"
+    quantity: 300
+    ship_date: "2024-02-27"
+    arrival_date: "2024-03-01"
+
+  - inbound_id: "INB_007"
+    supply_node_id: "SN_DOMESTIC_01"
+    dest_node_id: "DC_EAST"
+    product_id: "B"
+    quantity: 120
+    ship_date: "2024-02-27"
+    arrival_date: "2024-03-01"
+
+  - inbound_id: "INB_008"
+    supply_node_id: "SN_DOMESTIC_01"
+    dest_node_id: "DC_EAST"
+    product_id: "C"
+    quantity: 10
+    ship_date: "2024-02-27"
+    arrival_date: "2024-03-01"
+
+  - inbound_id: "INB_009"
+    supply_node_id: "SN_DOMESTIC_01"
+    dest_node_id: "DC_EAST"
+    product_id: "D"
+    quantity: 50
+    ship_date: "2024-02-27"
+    arrival_date: "2024-03-01"
+
+  - inbound_id: "INB_010"
+    supply_node_id: "SN_DOMESTIC_01"
+    dest_node_id: "DC_WEST"
+    product_id: "A"
+    quantity: 200
+    ship_date: "2024-02-27"
+    arrival_date: "2024-03-02"
+
+  - inbound_id: "INB_011"
+    supply_node_id: "SN_DOMESTIC_01"
+    dest_node_id: "DC_WEST"
+    product_id: "B"
+    quantity: 80
+    ship_date: "2024-02-27"
+    arrival_date: "2024-03-02"
+
+  # Asia supplier ocean shipment arriving at DC East
+  - inbound_id: "INB_012"
+    supply_node_id: "SN_ASIA_01"
+    dest_node_id: "DC_EAST"
+    product_id: "A"
+    quantity: 500
+    ship_date: "2024-01-15"
+    arrival_date: "2024-02-12"

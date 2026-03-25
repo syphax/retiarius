@@ -230,3 +230,4 @@ scimulator/data/
 # OS
 .DS_Store
 *.png
+scimulator/utilities/output/*

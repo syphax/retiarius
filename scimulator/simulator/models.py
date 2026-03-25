@@ -32,7 +32,7 @@ class SupplyNodeConfig:
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     tags: List[str] = field(default_factory=list)
-    products: List[str] = field(default_factory=list)  # product_ids
+    products: List[str] = field(default_factory=list)  # product_ids; empty = all products
     lead_time: Optional[float] = None
     lead_time_uom: Optional[str] = None
     qty_reliability: Optional[float] = None

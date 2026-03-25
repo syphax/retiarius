@@ -132,6 +132,7 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
     """)
 
     conn.execute("""
+        -- No rows = supply node can supply all products
         CREATE TABLE IF NOT EXISTS supply_node_product (
             supply_node_id TEXT NOT NULL,
             product_id TEXT NOT NULL,

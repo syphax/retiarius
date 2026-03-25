@@ -1,0 +1,69 @@
+# Drawdown Prep Configuration
+# ============================
+# Used by: python -m scimulator.utilities.drawdown_prep [this_file]
+#
+# Generates two CSV files for a drawdown simulation:
+#   1. Initial inventory — starting stock at each distribution node
+#   2. Inbound schedule  — replenishment receipts arriving during the sim
+#
+# Parameters:
+#
+#   name              — Run identifier. Output files are named
+#                       initial_inventory-{name}.csv and inbound_schedule-{name}.csv.
+#
+#   demand_file       — Path to demand CSV (from synthetic demand engine).
+#                       Expected columns: timestamp|demand_date, part_number|product_id,
+#                       quantity. Used to compute monthly demand per product.
+#
+#   node_file         — Path to node CSV listing active distribution nodes.
+#                       Expected columns: facility_code (used as dist_node_id).
+#
+#   start_date        — Simulation start date (ISO format). Used to convert
+#                       reorder day offsets into actual dates.
+#
+#   supply_node_id    — Supply node ID for inbound schedule records.
+#                       All receipts are attributed to this single source.
+#
+#   ship_lead_time    — Days between ship_date and arrival_date. Defaults to 0
+#                       (ship_date = arrival_date) since these are synthetic receipts.
+#
+#   inventory_mos     — Average months of demand to stock as initial inventory
+#                       across the entire network. Each product's total is drawn
+#                       from N(inventory_mos, inventory_mos_sd), clipped to [0.5, ∞).
+#                       The total is then split evenly across nodes (with remainders
+#                       distributed one unit at a time to arbitrary nodes).
+#
+#   inventory_mos_sd  — Std dev (in months) of the initial inventory draw.
+#
+#   reorder_mos       — Average months of demand for the reorder quantity (network
+#                       total). Drawn from N(reorder_mos, reorder_mos_sd), clipped
+#                       to [0.5, ∞), then divided evenly across nodes.
+#
+#   reorder_mos_sd    — Std dev (in months) of the reorder quantity draw.
+#
+#   reorder_start     — Earliest arrival day (offset from start_date).
+#
+#   reorder_end       — Latest mean arrival day (offset from start_date).
+#                       The per-product mean arrival day is drawn uniformly from
+#                       [reorder_start, reorder_end].
+#
+#   reorder_dt_sd     — Std dev (in days) of per-node arrival date scatter around
+#                       the product's mean arrival day.
+#
+#   seed              — Random seed for reproducibility. Set to null for
+#                       non-deterministic output.
+
+name: "test_100"
+demand_file: "./scimulator/data/dmd_model_test_100.csv"
+node_file: "./scimulator/data/nodes_test_10.csv"
+start_date: "2026-01-01"
+supply_node_id: "GENERIC_SUPPLY"
+ship_lead_time: 0
+inventory_mos: 2
+inventory_mos_sd: 0.5
+reorder_mos: 2
+reorder_mos_sd: 0.5
+reorder_start: 30
+reorder_end: 60
+reorder_dt_sd: 7
+seed: 42
