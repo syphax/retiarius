@@ -342,13 +342,22 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS zone_table (
-            origin_zip3 TEXT NOT NULL,
-            dest_zip3 TEXT NOT NULL,
+            zone_table_name TEXT NOT NULL,
+            origin_key TEXT NOT NULL,
+            dest_key TEXT NOT NULL,
             zone TEXT,
-            distance_haversine DECIMAL(10,2),
+            distance DECIMAL(10,2),
             distance_uom TEXT DEFAULT 'km',
             transit_days_base DECIMAL(4,1),
-            PRIMARY KEY (origin_zip3, dest_zip3)
+            PRIMARY KEY (zone_table_name, origin_key, dest_key)
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS edge_zone_map (
+            edge_id TEXT PRIMARY KEY,
+            zone_table_name TEXT NOT NULL,
+            zone TEXT
         )
     """)
 

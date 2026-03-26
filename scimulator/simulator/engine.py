@@ -235,12 +235,7 @@ class DrawdownEngine:
 
         # Pre-load zone data for zone-derived edges
         zone_rows = self.conn.execute("""
-            SELECT e.edge_id, zt.zone
-            FROM edge e
-            JOIN distribution_node dn ON dn.dist_node_id = e.origin_node_id
-            JOIN demand_node dem ON dem.demand_node_id = e.dest_node_id
-            JOIN zone_table zt ON zt.origin_zip3 = dn.zip3 AND zt.dest_zip3 = dem.zip3
-            WHERE dn.zip3 IS NOT NULL AND dem.zip3 IS NOT NULL AND zt.zone IS NOT NULL
+            SELECT edge_id, zone FROM edge_zone_map WHERE zone IS NOT NULL
         """).fetchall()
         for edge_id, zone in zone_rows:
             self._edge_zones[edge_id] = str(zone)

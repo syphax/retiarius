@@ -20,6 +20,7 @@ import pandas as pd
 from .models import ScenarioConfig, SupplierConfig, SupplyNodeConfig
 from .models import DistributionNodeConfig, DemandNodeConfig, EdgeConfig
 from .models import ProductConfig, InboundShipment, InitialInventory
+from .models import ZoneTableConfig, EdgeGenerationConfig
 from .db import create_database, open_database
 from .edge_builders import build_edges_from_zones
 
@@ -48,6 +49,8 @@ def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
     products = [ProductConfig(**p) for p in raw.get('products', [])]
     inbound_schedule = [InboundShipment(**i) for i in raw.get('inbound_schedule', [])]
     initial_inventory = [InitialInventory(**i) for i in raw.get('initial_inventory', [])]
+    zone_tables = [ZoneTableConfig(**z) for z in raw.get('zone_tables', [])]
+    edge_generation = [EdgeGenerationConfig(**e) for e in raw.get('edge_generation', [])]
 
     # Build top-level config
     top_keys = {
@@ -56,7 +59,7 @@ def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
         'write_event_log', 'write_snapshots', 'snapshot_interval_days',
         'dataset_version_id', 'demand_csv', 'inbound_schedule_csv',
         'initial_inventory_csv', 'product_csv', 'distribution_nodes_csv',
-        'edge_csvs', 'zone_table_csv',
+        'edge_csvs',
         'params', 'notes',
         'product_set_id', 'supply_node_set_id', 'distribution_node_set_id',
         'demand_node_set_id', 'edge_set_id',
@@ -73,6 +76,8 @@ def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
         products=products,
         inbound_schedule=inbound_schedule,
         initial_inventory=initial_inventory,
+        zone_tables=zone_tables,
+        edge_generation=edge_generation,
     )
 
 
@@ -92,7 +97,7 @@ def load_scenario_into_db(config: ScenarioConfig, db_path: str) -> duckdb.DuckDB
     _load_distribution_nodes(conn, config)
     _load_demand_nodes(conn, config)
     _load_edges(conn, config)
-    _load_zone_table(conn, config)
+    _load_zone_tables(conn, config)
     _load_products(conn, config)
     _load_demand(conn, config)
     _load_inbound_schedule(conn, config)
@@ -258,28 +263,42 @@ def _load_edges(conn, config: ScenarioConfig):
         logger.info(f"Loaded {rows} edges from {csv_path}")
 
 
-def _load_zone_table(conn, config: ScenarioConfig):
-    """Load parcel zone table from CSV — bulk via DuckDB."""
-    if not config.zone_table_csv:
-        return
+def _load_zone_tables(conn, config: ScenarioConfig):
+    """Load zone/rate tables from CSV — bulk via DuckDB."""
+    for zt_config in config.zone_tables:
+        csv_path = _resolve_csv(zt_config.csv)
+        table_name = zt_config.name
+        origin_col = zt_config.origin_key
+        dest_col = zt_config.dest_key
 
-    csv_path = _resolve_csv(config.zone_table_csv)
+        # Sniff CSV columns to map optional fields
+        csv_cols = set(conn.execute(
+            f"SELECT * FROM read_csv_auto('{csv_path}', all_varchar=false) LIMIT 0"
+        ).description)
+        csv_cols = {desc[0] for desc in csv_cols}
 
-    conn.execute(f"""
-        INSERT OR REPLACE INTO zone_table
-        SELECT
-            lpad(CAST(origin_zip3 AS VARCHAR), 3, '0'),
-            lpad(CAST(dest_zip3 AS VARCHAR), 3, '0'),
-            CAST(zone AS VARCHAR),
-            distance_haversine,
-            COALESCE(distance_uom, 'km'),
-            transit_days_base
-        FROM read_csv_auto('{csv_path}', all_varchar=false)
-    """)
-    rows = conn.execute(f"""
-        SELECT count(*) FROM read_csv_auto('{csv_path}')
-    """).fetchone()[0]
-    logger.info(f"Loaded {rows} zone table entries from {csv_path}")
+        dist_expr = 'distance_haversine' if 'distance_haversine' in csv_cols else (
+            'distance' if 'distance' in csv_cols else 'NULL')
+        zone_expr = 'CAST(zone AS VARCHAR)' if 'zone' in csv_cols else 'NULL'
+        uom_expr = "COALESCE(distance_uom, 'km')" if 'distance_uom' in csv_cols else "'km'"
+        transit_expr = 'transit_days_base' if 'transit_days_base' in csv_cols else 'NULL'
+
+        conn.execute(f"""
+            INSERT OR REPLACE INTO zone_table
+            SELECT
+                '{table_name}',
+                CAST({origin_col} AS VARCHAR),
+                CAST({dest_col} AS VARCHAR),
+                {zone_expr},
+                {dist_expr},
+                {uom_expr},
+                {transit_expr}
+            FROM read_csv_auto('{csv_path}', all_varchar=false)
+        """)
+        rows = conn.execute(
+            "SELECT count(*) FROM zone_table WHERE zone_table_name = ?", [table_name]
+        ).fetchone()[0]
+        logger.info(f"Loaded {rows} entries into zone table '{table_name}' from {csv_path}")
 
 
 def _load_products(conn, config: ScenarioConfig):
@@ -467,11 +486,27 @@ def _load_initial_inventory(conn, config: ScenarioConfig):
 def _build_generated_edges(conn, config: ScenarioConfig):
     """Run edge builders that generate edges from abstract relationships.
 
-    Currently supports zone-table-based edge generation. Future builders
-    (distance-based cost rules, LTL lane tables, etc.) plug in here.
+    Iterates over edge_generation rules, each of which pairs a zone table
+    with origin/dest node types and the node attributes to join on.
     """
-    if config.zone_table_csv:
-        build_edges_from_zones(conn)
+    zt_names = {z.name for z in config.zone_tables}
+    for rule in config.edge_generation:
+        if rule.zone_table not in zt_names:
+            raise ValueError(
+                f"edge_generation references unknown zone_table '{rule.zone_table}'. "
+                f"Available: {sorted(zt_names)}")
+        build_edges_from_zones(
+            conn,
+            zone_table_name=rule.zone_table,
+            origin_type=rule.origin_type,
+            dest_type=rule.dest_type,
+            origin_node_attribute=rule.origin_node_attribute,
+            dest_node_attribute=rule.dest_node_attribute,
+            transport_type=rule.transport_type,
+            transit_time_distribution=rule.transit_time_distribution,
+            cost_variable=rule.cost_variable,
+            cost_variable_basis=rule.cost_variable_basis,
+        )
 
 
 def _load_scenario(conn, config: ScenarioConfig):

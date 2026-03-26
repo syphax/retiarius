@@ -110,6 +110,29 @@ class ProductConfig:
 
 
 @dataclass
+class ZoneTableConfig:
+    """A zone/rate table CSV and its key columns."""
+    name: str
+    csv: str
+    origin_key: str  # column name in the CSV (e.g. 'origin_zip3')
+    dest_key: str    # column name in the CSV (e.g. 'dest_zip3')
+
+
+@dataclass
+class EdgeGenerationConfig:
+    """Rule for generating edges from a zone table between two node types."""
+    origin_type: str              # node type: 'supply', 'distribution', 'demand'
+    dest_type: str                # node type: 'supply', 'distribution', 'demand'
+    zone_table: str               # name reference to a ZoneTableConfig
+    origin_node_attribute: str    # column on origin node table to join (e.g. 'zip3')
+    dest_node_attribute: str      # column on dest node table to join (e.g. 'zip3')
+    transport_type: str = "parcel"
+    transit_time_distribution: str = "lognormal"
+    cost_variable: float = 0.0
+    cost_variable_basis: str = "per_unit"
+
+
+@dataclass
 class InboundShipment:
     inbound_id: str
     supply_node_id: str
@@ -162,7 +185,8 @@ class ScenarioConfig:
     product_csv: Optional[str] = None  # Path to product master CSV
     distribution_nodes_csv: Optional[str] = None  # Path to distribution nodes CSV
     edge_csvs: List[str] = field(default_factory=list)  # Paths to edge CSVs
-    zone_table_csv: Optional[str] = None  # Path to zone table CSV
+    zone_tables: List[ZoneTableConfig] = field(default_factory=list)
+    edge_generation: List[EdgeGenerationConfig] = field(default_factory=list)
     inbound_schedule: List[InboundShipment] = field(default_factory=list)
     initial_inventory: List[InitialInventory] = field(default_factory=list)
 

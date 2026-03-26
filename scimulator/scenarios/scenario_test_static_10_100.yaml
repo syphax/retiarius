@@ -22,8 +22,27 @@ dataset_version_id: "sample_v1"
 
 product_csv: "scimulator/data/product_master_drawdown_test_2_100.csv"
 demand_csv: "scimulator/data/dmd_drawdown_test_2_100.csv"
-zone_table_csv: './scimulator/utilities/output/zone_table-test_10.csv'
+
 distribution_nodes_csv: "scimulator/data/nodes_drawdown_test_2_10.csv"
+
+# Transport:
+
+zone_tables:
+  - name: parcel_zones
+    csv: './scimulator/utilities/output/zone_table-test_10.csv'
+    origin_key: origin_zip3
+    dest_key: dest_zip3
+
+edge_generation:
+  - origin_type: distribution
+    dest_type: demand
+    zone_table: parcel_zones
+    origin_node_attribute: zip3
+    dest_node_attribute: zip3
+    transport_type: parcel
+
+# Initial state:
+
 initial_inventory_csv: "scimulator/data/initial_inventory-drawdown_test_2.csv"
 inbound_schedule_csv: "scimulator/data/inbound_schedule-drawdown_test_2.csv"
 
