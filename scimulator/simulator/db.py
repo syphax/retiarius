@@ -219,7 +219,8 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             weight_uom TEXT DEFAULT 'kg',
             cube DECIMAL(10,4) NOT NULL,
             cube_uom TEXT DEFAULT 'L',
-            orderable_qty INTEGER NOT NULL DEFAULT 1
+            orderable_qty INTEGER NOT NULL DEFAULT 1,
+            currency TEXT DEFAULT 'USD'
         )
     """)
 

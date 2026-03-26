@@ -37,7 +37,7 @@ name: "test_10"
 zip3_file: './scimulator/data/zip3_pop_2020.csv'
 origin_zip3s: []  # empty = use node_file zip3s below
 dest_zip3s: []    # empty = all zip3s in zip3_file
-node_file: './scimulator/data/nodes_test_10.csv'
+node_file: './scimulator/data/nodes_drawdown_test_2_10.csv'
 distance_uom: "mi"
 avg_transit_speed: 500
 speed_uom: "mi/day"

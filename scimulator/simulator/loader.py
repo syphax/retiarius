@@ -3,6 +3,8 @@ Data loader: loads scenario configuration into DuckDB.
 
 Handles loading YAML scenario configs, demand CSVs from the synthetic demand
 engine, and all network topology / product / inventory data.
+
+CSV loading uses DuckDB's native read_csv_auto for bulk performance.
 """
 
 import yaml
@@ -22,6 +24,14 @@ from .db import create_database, open_database
 from .edge_builders import build_edges_from_zones
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_csv(path_str: str) -> str:
+    """Resolve a CSV path and verify it exists. Returns absolute path string."""
+    csv_path = Path(path_str).expanduser()
+    if not csv_path.exists():
+        raise FileNotFoundError(f"CSV not found: {csv_path}")
+    return str(csv_path.resolve())
 
 
 def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
@@ -45,7 +55,7 @@ def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
         'start_date', 'end_date', 'warm_up_days', 'backorder_probability',
         'write_event_log', 'write_snapshots', 'snapshot_interval_days',
         'dataset_version_id', 'demand_csv', 'inbound_schedule_csv',
-        'initial_inventory_csv', 'distribution_nodes_csv',
+        'initial_inventory_csv', 'product_csv', 'distribution_nodes_csv',
         'edge_csvs', 'zone_table_csv',
         'params', 'notes',
         'product_set_id', 'supply_node_set_id', 'distribution_node_set_id',
@@ -137,49 +147,36 @@ def _load_supply_nodes(conn, config: ScenarioConfig):
 
 
 def _load_distribution_nodes(conn, config: ScenarioConfig):
-    # Load from CSV if specified
+    # Load from CSV — bulk via DuckDB with column aliasing
     if config.distribution_nodes_csv:
-        csv_path = Path(config.distribution_nodes_csv).expanduser()
-        if not csv_path.exists():
-            raise FileNotFoundError(f"Distribution nodes CSV not found: {csv_path}")
+        csv_path = _resolve_csv(config.distribution_nodes_csv)
 
+        # Read into pandas for column aliasing (small table, flexibility matters more)
         df = pd.read_csv(csv_path)
-        logger.info(f"Loading {len(df)} distribution nodes from {csv_path}")
-
-        # Map common column names
         if 'facility_code' in df.columns and 'dist_node_id' not in df.columns:
             df['dist_node_id'] = df['facility_code']
         if 'lat' in df.columns and 'latitude' not in df.columns:
             df['latitude'] = df['lat']
         if 'lng' in df.columns and 'longitude' not in df.columns:
             df['longitude'] = df['lng']
-
-        if 'dist_node_id' not in df.columns:
-            raise ValueError("Distribution nodes CSV must have 'facility_code' or 'dist_node_id' column")
-
-        # Ensure zip3 is zero-padded string
         if 'zip3' in df.columns:
             df['zip3'] = df['zip3'].astype(str).str.zfill(3)
 
-        for _, row in df.iterrows():
-            conn.execute("""
-                INSERT OR REPLACE INTO distribution_node VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, [
-                row['dist_node_id'],
-                row.get('name', row['dist_node_id']),
-                float(row['latitude']) if pd.notna(row.get('latitude')) else None,
-                float(row['longitude']) if pd.notna(row.get('longitude')) else None,
-                row.get('zip3') if pd.notna(row.get('zip3')) else None,
-                None, 'm3',    # storage_capacity, storage_capacity_uom
-                None, None,    # max_inbound, max_inbound_uom
-                None, None,    # max_outbound, max_outbound_uom
-                1.0, 'days',   # order_response_time, order_response_time_uom
-                0.0, 'per_day',   # fixed_cost, fixed_cost_basis
-                0.0, 'per_unit',  # variable_cost, variable_cost_basis
-                None, None,    # overage_penalty, overage_penalty_basis
-            ])
-
+        insert_df = pd.DataFrame({
+            'dist_node_id': df['dist_node_id'],
+            'name': df.get('name', df['dist_node_id']),
+            'latitude': df.get('latitude'),
+            'longitude': df.get('longitude'),
+            'zip3': df.get('zip3'),
+        })
+        conn.execute("""
+            INSERT OR REPLACE INTO distribution_node
+            SELECT
+                dist_node_id, name, latitude, longitude, zip3,
+                NULL, 'm3', NULL, NULL, NULL, NULL,
+                1.0, 'days', 0.0, 'per_day', 0.0, 'per_unit', NULL, NULL
+            FROM insert_df
+        """)
         logger.info(f"Loaded {len(df)} distribution nodes from {csv_path}")
 
     # Load from inline YAML entries
@@ -228,88 +225,95 @@ def _load_edges(conn, config: ScenarioConfig):
             e.distance, e.distance_uom, e.distance_method,
         ])
 
-    # Load from edge CSVs
+    # Load from edge CSVs — bulk via DuckDB
     for csv_file in config.edge_csvs:
-        csv_path = Path(csv_file).expanduser()
-        if not csv_path.exists():
-            raise FileNotFoundError(f"Edge CSV not found: {csv_path}")
+        csv_path = _resolve_csv(csv_file)
 
-        df = pd.read_csv(csv_path)
-        logger.info(f"Loading {len(df)} edges from {csv_path}")
-
-        required_cols = {'edge_id', 'origin_node_id', 'origin_node_type',
-                         'dest_node_id', 'dest_node_type'}
-        missing = required_cols - set(df.columns)
-        if missing:
-            raise ValueError(f"Edge CSV {csv_path} missing columns: {missing}")
-
-        for _, row in df.iterrows():
-            conn.execute("""
-                INSERT OR REPLACE INTO edge VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, [
-                row['edge_id'], row['origin_node_id'], row['origin_node_type'],
-                row['dest_node_id'], row['dest_node_type'],
-                row.get('transport_type', 'parcel'),
-                float(row.get('mean_transit_time', 2.0)),
-                row.get('mean_transit_time_uom', 'days'),
-                row.get('transit_time_distribution', 'lognormal'),
-                row.get('transit_time_std') if pd.notna(row.get('transit_time_std')) else None,
-                row.get('transit_time_std_uom') if pd.notna(row.get('transit_time_std_uom')) else None,
-                row.get('transit_time_skew') if pd.notna(row.get('transit_time_skew')) else None,
-                float(row.get('cost_fixed', 0)),
-                float(row.get('cost_variable', 0)),
-                row.get('cost_variable_basis', 'per_unit'),
-                float(row['distance']) if pd.notna(row.get('distance')) else None,
-                row.get('distance_uom', 'km'),
-                row.get('distance_method') if pd.notna(row.get('distance_method')) else None,
-            ])
-
-        logger.info(f"Loaded {len(df)} edges from {csv_path}")
+        conn.execute(f"""
+            INSERT OR REPLACE INTO edge
+            SELECT
+                edge_id,
+                origin_node_id,
+                origin_node_type,
+                dest_node_id,
+                dest_node_type,
+                COALESCE(transport_type, 'parcel'),
+                COALESCE(mean_transit_time, 2.0),
+                COALESCE(mean_transit_time_uom, 'days'),
+                COALESCE(transit_time_distribution, 'lognormal'),
+                transit_time_std,
+                transit_time_std_uom,
+                transit_time_skew,
+                COALESCE(cost_fixed, 0),
+                COALESCE(cost_variable, 0),
+                COALESCE(cost_variable_basis, 'per_unit'),
+                distance,
+                COALESCE(distance_uom, 'km'),
+                distance_method
+            FROM read_csv_auto('{csv_path}', union_by_name=true, all_varchar=false)
+        """)
+        rows = conn.execute(f"""
+            SELECT count(*) FROM read_csv_auto('{csv_path}')
+        """).fetchone()[0]
+        logger.info(f"Loaded {rows} edges from {csv_path}")
 
 
 def _load_zone_table(conn, config: ScenarioConfig):
-    """Load parcel zone table from CSV."""
+    """Load parcel zone table from CSV — bulk via DuckDB."""
     if not config.zone_table_csv:
         return
 
-    csv_path = Path(config.zone_table_csv).expanduser()
-    if not csv_path.exists():
-        raise FileNotFoundError(f"Zone table CSV not found: {csv_path}")
+    csv_path = _resolve_csv(config.zone_table_csv)
 
-    df = pd.read_csv(csv_path)
-    logger.info(f"Loading {len(df)} zone table rows from {csv_path}")
-
-    required_cols = {'origin_zip3', 'dest_zip3'}
-    missing = required_cols - set(df.columns)
-    if missing:
-        raise ValueError(f"Zone table CSV missing columns: {missing}")
-
-    # Ensure zip3 columns are zero-padded strings
-    df['origin_zip3'] = df['origin_zip3'].astype(str).str.zfill(3)
-    df['dest_zip3'] = df['dest_zip3'].astype(str).str.zfill(3)
-
-    for _, row in df.iterrows():
-        conn.execute("""
-            INSERT OR REPLACE INTO zone_table VALUES (?, ?, ?, ?, ?, ?)
-        """, [
-            row['origin_zip3'], row['dest_zip3'],
-            str(row['zone']) if pd.notna(row.get('zone')) else None,
-            float(row['distance_haversine']) if pd.notna(row.get('distance_haversine')) else None,
-            row.get('distance_uom', 'km') if pd.notna(row.get('distance_uom')) else 'km',
-            float(row['transit_days_base']) if pd.notna(row.get('transit_days_base')) else None,
-        ])
-
-    logger.info(f"Loaded {len(df)} zone table entries")
+    conn.execute(f"""
+        INSERT OR REPLACE INTO zone_table
+        SELECT
+            lpad(CAST(origin_zip3 AS VARCHAR), 3, '0'),
+            lpad(CAST(dest_zip3 AS VARCHAR), 3, '0'),
+            CAST(zone AS VARCHAR),
+            distance_haversine,
+            COALESCE(distance_uom, 'km'),
+            transit_days_base
+        FROM read_csv_auto('{csv_path}', all_varchar=false)
+    """)
+    rows = conn.execute(f"""
+        SELECT count(*) FROM read_csv_auto('{csv_path}')
+    """).fetchone()[0]
+    logger.info(f"Loaded {rows} zone table entries from {csv_path}")
 
 
 def _load_products(conn, config: ScenarioConfig):
+    # Load from CSV — pandas for column aliasing, then bulk insert via DuckDB
+    if config.product_csv:
+        csv_path = _resolve_csv(config.product_csv)
+        df = pd.read_csv(csv_path)
+
+        if 'part_number' in df.columns and 'product_id' not in df.columns:
+            df['product_id'] = df['part_number']
+
+        insert_df = pd.DataFrame({
+            'product_id': df['product_id'],
+            'name': df.get('name', df['product_id']),
+            'standard_cost': df.get('standard_cost', 0.0).fillna(0.0),
+            'base_price': df.get('base_price', 0.0).fillna(0.0),
+            'weight': df.get('weight', 0.0).fillna(0.0),
+            'weight_uom': df.get('weight_uom', 'kg').fillna('kg'),
+            'cube': df.get('cube', 1.0).fillna(1.0),
+            'cube_uom': df.get('cube_uom', 'L').fillna('L'),
+            'orderable_qty': df.get('orderable_qty', 1).fillna(1).astype(int),
+            'currency': df.get('currency', 'USD').fillna('USD'),
+        })
+        conn.execute("INSERT OR REPLACE INTO product SELECT * FROM insert_df")
+        logger.info(f"Loaded {len(df)} products from {csv_path}")
+
+    # Load from inline YAML entries
     for p in config.products:
         conn.execute("""
-            INSERT OR REPLACE INTO product VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO product VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, [
             p.product_id, p.name, p.standard_cost, p.base_price,
             p.weight, p.weight_uom, p.cube, p.cube_uom, p.orderable_qty,
+            p.currency,
         ])
         for key, value in p.attributes.items():
             conn.execute("""
@@ -319,7 +323,11 @@ def _load_products(conn, config: ScenarioConfig):
 
 
 def _load_demand(conn, config: ScenarioConfig):
-    """Load demand data from the synthetic demand engine CSV."""
+    """Load demand data from the synthetic demand engine CSV.
+
+    This loader does column mapping/transforms in pandas, then bulk-inserts
+    via DuckDB's native DataFrame ingestion.
+    """
     if not config.demand_csv:
         logger.warning("No demand_csv specified; skipping demand load")
         return
@@ -331,26 +339,25 @@ def _load_demand(conn, config: ScenarioConfig):
     df = pd.read_csv(csv_path)
     logger.info(f"Loading {len(df)} demand rows from {csv_path}")
 
-    # The demand engine outputs: order_id, timestamp, part_number, zip3, quantity
-    # We need to map to: dataset_version_id, demand_id, demand_date, demand_datetime,
-    #                     demand_node_id, product_id, quantity, order_id
-
     # Map zip3 to demand_node_id (prefixed with Z for ZIP3 aggregation)
     if 'zip3' in df.columns:
         df['demand_node_id'] = 'Z' + df['zip3'].astype(str).str.zfill(3)
     elif 'demand_node_id' in df.columns:
-        pass  # already has the right column
+        pass
     else:
         raise ValueError("Demand CSV must have 'zip3' or 'demand_node_id' column")
 
-    # Auto-create demand nodes from zip3 data if they don't exist
+    # Auto-create demand nodes from zip3 data
     if 'zip3' in df.columns:
         unique_zip3s = df[['zip3', 'demand_node_id']].drop_duplicates()
-        for _, row in unique_zip3s.iterrows():
-            conn.execute("""
-                INSERT OR IGNORE INTO demand_node (demand_node_id, name, zip3)
-                VALUES (?, ?, ?)
-            """, [row['demand_node_id'], f"ZIP3 {row['zip3']}", str(row['zip3'])])
+        unique_zip3s['name'] = 'ZIP3 ' + unique_zip3s['zip3'].astype(str)
+        unique_zip3s['zip3_str'] = unique_zip3s['zip3'].astype(str)
+        demand_nodes_df = unique_zip3s[['demand_node_id', 'name', 'zip3_str']].copy()
+        demand_nodes_df.columns = ['demand_node_id', 'name', 'zip3']
+        conn.execute("""
+            INSERT OR IGNORE INTO demand_node (demand_node_id, name, zip3)
+            SELECT demand_node_id, name, zip3 FROM demand_nodes_df
+        """)
 
     # Parse timestamps
     if 'timestamp' in df.columns:
@@ -375,20 +382,24 @@ def _load_demand(conn, config: ScenarioConfig):
         else:
             df['demand_id'] = [str(uuid.uuid4()) for _ in range(len(df))]
 
-    # Insert rows
-    for _, row in df.iterrows():
-        conn.execute("""
-            INSERT OR IGNORE INTO demand VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, [
-            config.dataset_version_id,
-            str(row['demand_id']),
-            row['demand_date'],
-            row.get('demand_datetime'),
-            row['demand_node_id'],
-            row['product_id'],
-            float(row['quantity']),
-            row.get('order_id'),
-        ])
+    # Add dataset_version_id
+    df['dataset_version_id'] = config.dataset_version_id
+
+    # Ensure order_id exists
+    if 'order_id' not in df.columns:
+        df['order_id'] = None
+
+    # Bulk insert via DuckDB DataFrame ingestion
+    insert_df = df[['dataset_version_id', 'demand_id', 'demand_date',
+                     'demand_datetime', 'demand_node_id', 'product_id',
+                     'quantity', 'order_id']].copy()
+    insert_df['demand_id'] = insert_df['demand_id'].astype(str)
+    insert_df['quantity'] = insert_df['quantity'].astype(float)
+
+    conn.execute("""
+        INSERT OR IGNORE INTO demand
+        SELECT * FROM insert_df
+    """)
 
     logger.info(f"Loaded {len(df)} demand events for dataset {config.dataset_version_id}")
 
@@ -404,31 +415,28 @@ def _load_inbound_schedule(conn, config: ScenarioConfig):
             i.quantity, i.ship_date, i.arrival_date,
         ])
 
-    # Load from CSV if specified
+    # Load from CSV — bulk via DuckDB
     if config.inbound_schedule_csv:
-        csv_path = Path(config.inbound_schedule_csv).expanduser()
-        if not csv_path.exists():
-            raise FileNotFoundError(f"Inbound schedule CSV not found: {csv_path}")
+        csv_path = _resolve_csv(config.inbound_schedule_csv)
+        dsv = config.dataset_version_id
 
-        df = pd.read_csv(csv_path)
-        logger.info(f"Loading {len(df)} inbound schedule rows from {csv_path}")
-
-        required_cols = {'inbound_id', 'supply_node_id', 'dest_node_id',
-                         'product_id', 'quantity', 'ship_date', 'arrival_date'}
-        missing = required_cols - set(df.columns)
-        if missing:
-            raise ValueError(f"Inbound schedule CSV missing columns: {missing}")
-
-        for _, row in df.iterrows():
-            conn.execute("""
-                INSERT OR REPLACE INTO inbound_schedule VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, [
-                config.dataset_version_id, str(row['inbound_id']),
-                row['supply_node_id'], row['dest_node_id'], row['product_id'],
-                float(row['quantity']), row['ship_date'], row['arrival_date'],
-            ])
-
-        logger.info(f"Loaded {len(df)} inbound schedule events for dataset {config.dataset_version_id}")
+        conn.execute(f"""
+            INSERT OR REPLACE INTO inbound_schedule
+            SELECT
+                '{dsv}' AS dataset_version_id,
+                CAST(inbound_id AS VARCHAR),
+                supply_node_id,
+                dest_node_id,
+                product_id,
+                quantity,
+                ship_date,
+                arrival_date
+            FROM read_csv_auto('{csv_path}', all_varchar=false)
+        """)
+        rows = conn.execute(f"""
+            SELECT count(*) FROM read_csv_auto('{csv_path}')
+        """).fetchone()[0]
+        logger.info(f"Loaded {rows} inbound schedule events from {csv_path}")
 
 
 def _load_initial_inventory(conn, config: ScenarioConfig):
@@ -441,33 +449,19 @@ def _load_initial_inventory(conn, config: ScenarioConfig):
             inv.product_id, inv.inventory_state, inv.quantity,
         ])
 
-    # Load from CSV if specified
+    # Load from CSV — pandas for defaults, then bulk insert
     if config.initial_inventory_csv:
-        csv_path = Path(config.initial_inventory_csv).expanduser()
-        if not csv_path.exists():
-            raise FileNotFoundError(f"Initial inventory CSV not found: {csv_path}")
-
+        csv_path = _resolve_csv(config.initial_inventory_csv)
         df = pd.read_csv(csv_path)
-        logger.info(f"Loading {len(df)} initial inventory rows from {csv_path}")
 
-        required_cols = {'dist_node_id', 'product_id', 'quantity'}
-        missing = required_cols - set(df.columns)
-        if missing:
-            raise ValueError(f"Initial inventory CSV missing columns: {missing}")
-
-        # Default inventory_state to 'saleable' if not in CSV
         if 'inventory_state' not in df.columns:
             df['inventory_state'] = 'saleable'
 
-        for _, row in df.iterrows():
-            conn.execute("""
-                INSERT OR REPLACE INTO initial_inventory VALUES (?, ?, ?, ?, ?)
-            """, [
-                config.dataset_version_id, row['dist_node_id'],
-                row['product_id'], row['inventory_state'], float(row['quantity']),
-            ])
-
-        logger.info(f"Loaded {len(df)} initial inventory rows for dataset {config.dataset_version_id}")
+        df['dataset_version_id'] = config.dataset_version_id
+        insert_df = df[['dataset_version_id', 'dist_node_id', 'product_id',
+                         'inventory_state', 'quantity']]
+        conn.execute("INSERT OR REPLACE INTO initial_inventory SELECT * FROM insert_df")
+        logger.info(f"Loaded {len(df)} initial inventory rows from {csv_path}")
 
 
 def _build_generated_edges(conn, config: ScenarioConfig):

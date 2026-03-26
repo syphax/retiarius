@@ -20,11 +20,12 @@ dataset_version_id: "sample_v1"
 
 # Input files:
 
-demand_csv: "scimulator/data/dmd_model_test_100.csv"
+product_csv: "scimulator/data/product_master_drawdown_test_2_100.csv"
+demand_csv: "scimulator/data/dmd_drawdown_test_2_100.csv"
 zone_table_csv: './scimulator/utilities/output/zone_table-test_10.csv'
 distribution_nodes_csv: "scimulator/data/nodes_drawdown_test_2_10.csv"
-initial_inventory_csv: "scimulator/data/initial_inventory_drawdown_test_2_100.csv"
-inbound_schedule_csv: "scimulator/data/inbound_drawdown_test_2_100.csv"
+initial_inventory_csv: "scimulator/data/initial_inventory-drawdown_test_2.csv"
+inbound_schedule_csv: "scimulator/data/inbound_schedule-drawdown_test_2.csv"
 
 
 suppliers:

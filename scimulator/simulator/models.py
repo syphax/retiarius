@@ -105,6 +105,7 @@ class ProductConfig:
     cube: float = 1.0
     cube_uom: str = "L"
     orderable_qty: int = 1
+    currency: str = "USD"
     attributes: Dict[str, str] = field(default_factory=dict)
 
 
@@ -158,6 +159,7 @@ class ScenarioConfig:
     demand_csv: Optional[str] = None  # Path to demand CSV from demand engine
     inbound_schedule_csv: Optional[str] = None  # Path to inbound schedule CSV
     initial_inventory_csv: Optional[str] = None  # Path to initial inventory CSV
+    product_csv: Optional[str] = None  # Path to product master CSV
     distribution_nodes_csv: Optional[str] = None  # Path to distribution nodes CSV
     edge_csvs: List[str] = field(default_factory=list)  # Paths to edge CSVs
     zone_table_csv: Optional[str] = None  # Path to zone table CSV
