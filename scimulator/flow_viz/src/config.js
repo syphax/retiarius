@@ -20,7 +20,7 @@ export const CONFIG = {
     aggregation: 'none',       // 'none' | 'day_zip3'
     sizeAttribute: 'none',     // 'none' | 'value' | 'weight' | 'cube'
     sizeScale: 3,              // 1-10
-    colorAttribute: 'none',    // 'none' | 'value' | 'weight' | 'cube' | 'delivery_days' | 'brand'
+    colorAttribute: 'none',    // 'none' | 'value' | 'weight' | 'cube' | 'delivery_days' | 'product'
     pathMode: 'recent',        // 'none' | 'recent' | 'full_route' | 'cumulative'
     trailLength: 0.5,          // days (0 = none, max 2.0) — used by 'recent' and 'full_route' fade
     playbackSpeed: 3,          // speed level 1-5

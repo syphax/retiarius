@@ -216,7 +216,14 @@ export function MapView({
     if (object.trip) {
       const t = object.trip;
       return {
-        text: `Value: $${t.value.toLocaleString()}\nWeight: ${t.weight} lbs\nDelivery: ${t.deliveryDays.toFixed(1)} days\nBrand: ${t.brand}`,
+        text: [
+          `From: ${t.originName}`,
+          `To: ${t.destName}`,
+          `Product: ${t.product}`,
+          `Delivery: ${t.deliveryDays.toFixed(1)} days`,
+          `Value: $${t.value.toLocaleString()}`,
+          `Weight: ${t.weight} lbs`,
+        ].join('\n'),
       };
     }
     if (object.name) {

@@ -68,7 +68,7 @@ export function Sidebar({ params, onChange, onRecalculate, dirty }) {
               <option value="weight">Weight</option>
               <option value="cube">Cube</option>
               <option value="delivery_days">Delivery Days</option>
-              <option value="brand">Brand</option>
+              <option value="product">Product</option>
             </select>
           </div>
 

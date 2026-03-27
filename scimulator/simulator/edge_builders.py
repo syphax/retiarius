@@ -86,7 +86,7 @@ def build_edges_from_zones(conn: duckdb.DuckDBPyConnection,
             origin_id, origin_type,
             dest_id, dest_type,
             transport_type,
-            float(transit_days) if transit_days else 2.0,
+            float(transit_days) if transit_days is not None else 2.0,
             'days',
             transit_time_distribution,
             None,  # transit_time_std
@@ -95,7 +95,7 @@ def build_edges_from_zones(conn: duckdb.DuckDBPyConnection,
             0.0,   # cost_fixed
             cost_variable,
             cost_variable_basis,
-            float(distance) if distance else None,
+            float(distance) if distance is not None else None,
             distance_uom or 'km',
             'haversine',
         ])

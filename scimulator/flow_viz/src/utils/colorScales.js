@@ -62,7 +62,7 @@ function normalize(value, min, max) {
 
 /**
  * Build a color accessor function based on the selected attribute.
- * @param {string} attribute - 'none' | 'value' | 'weight' | 'cube' | 'delivery_days' | 'brand'
+ * @param {string} attribute - 'none' | 'value' | 'weight' | 'cube' | 'delivery_days' | 'product'
  * @param {Object} stats - Data statistics from dataLoader
  * @returns {function(Object): [number, number, number, number]} RGBA color accessor
  */
@@ -79,13 +79,13 @@ export function buildColorAccessor(attribute, stats) {
     };
   }
 
-  if (attribute === 'brand') {
-    const brandIndex = {};
-    stats.brands.forEach((b, i) => {
-      brandIndex[b] = i < 10 ? i : -1;
+  if (attribute === 'product') {
+    const productIndex = {};
+    (stats.products || stats.brands || []).forEach((b, i) => {
+      productIndex[b] = i < 10 ? i : -1;
     });
     return (trip) => {
-      const idx = brandIndex[trip.brand];
+      const idx = productIndex[trip.product];
       const rgb = idx >= 0 ? CATEGORY10[idx] : OTHER_COLOR;
       return [...rgb, 220];
     };

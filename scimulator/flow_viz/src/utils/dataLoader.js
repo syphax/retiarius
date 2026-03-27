@@ -44,17 +44,21 @@ export async function loadFlowData(url) {
       30
     );
 
-    const deliveryDays = (deliveryTime - shipTime) / (1000 * 60 * 60 * 24);
+    const deliveryDays = row.delivery_days != null
+      ? row.delivery_days
+      : (deliveryTime - shipTime) / (1000 * 60 * 60 * 24);
 
     return {
       id: i,
       waypoints,
       startTime: shipTime,
       endTime: deliveryTime,
+      originName: row.origin_name || '',
+      destName: row.dest_name || '',
+      product: row.product || row.brand || '',
       value: row.value || 0,
       weight: row.weight || 0,
       cube: row.cube || 0,
-      brand: row.brand || '',
       deliveryDays,
       originLat: row.origin_lat,
       originLng: row.origin_lng,
@@ -71,7 +75,7 @@ export async function loadFlowData(url) {
     weight: { min: Infinity, max: -Infinity },
     cube: { min: Infinity, max: -Infinity },
     deliveryDays: { min: Infinity, max: -Infinity },
-    brands: new Set(),
+    products: new Set(),
   };
 
   for (const trip of trips) {
@@ -83,10 +87,12 @@ export async function loadFlowData(url) {
     stats.cube.max = Math.max(stats.cube.max, trip.cube);
     stats.deliveryDays.min = Math.min(stats.deliveryDays.min, trip.deliveryDays);
     stats.deliveryDays.max = Math.max(stats.deliveryDays.max, trip.deliveryDays);
-    if (trip.brand) stats.brands.add(trip.brand);
+    if (trip.product) stats.products.add(trip.product);
   }
 
-  stats.brands = Array.from(stats.brands);
+  stats.products = Array.from(stats.products);
+  // Keep brands as alias for backward compatibility with color scales
+  stats.brands = stats.products;
 
   // Precompute OD-pair routes for cumulative path mode
   const odMap = new Map();

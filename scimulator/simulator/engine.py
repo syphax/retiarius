@@ -86,7 +86,7 @@ class DrawdownEngine:
         self._snapshot_buffer: List[Tuple] = []
 
         # Pre-load edge routing info for fulfillment
-        self._fulfillment_routes: Dict[str, List[Tuple[str, str, float]]] = {}
+        self._fulfillment_routes: Dict[str, List[Dict]] = {}
         # Maps demand_node_id -> [(dist_node_id, edge_id, variable_cost)] sorted by cost
 
         # Zone lookup: edge_id -> zone (populated from zone_table for zone-derived edges)
@@ -185,15 +185,19 @@ class DrawdownEngine:
         logger.info(f"Initialized inventory: {len(rows)} positions, {total_units:.0f} total units")
 
     def _build_fulfillment_routes(self):
-        """Build routing tables: for each demand node, which distribution nodes can fulfill.
+        """Build routing tables: for each demand node, ranked list of fulfillment options.
 
-        Sorted by lowest variable cost first (simple drawdown routing).
-        Filters by active entity sets. Edges with endpoints outside active node
-        sets are pruned. Stranded nodes (no remaining edges) are warned.
+        Each route is a dict with edge attributes (distance, cost, zone, etc.)
+        so fulfillment logic can use any combination for ranking.
+
+        Current ranking: shortest haversine distance first.
         """
         query = """
-            SELECT e.edge_id, e.origin_node_id, e.dest_node_id, e.cost_variable
+            SELECT e.edge_id, e.origin_node_id, e.dest_node_id,
+                   e.cost_variable, e.distance,
+                   ezm.zone
             FROM edge e
+            LEFT JOIN edge_zone_map ezm ON e.edge_id = ezm.edge_id
             WHERE e.dest_node_type = 'demand' AND e.origin_node_type = 'distribution'
         """
         params = []
@@ -224,15 +228,23 @@ class DrawdownEngine:
             """
             params.append(self.demand_node_set_id)
 
-        query += " ORDER BY e.cost_variable ASC"
         rows = self.conn.execute(query, params).fetchall()
 
-        for edge_id, origin_id, dest_id, cost_var in rows:
+        for edge_id, origin_id, dest_id, cost_var, distance, zone in rows:
+            route = {
+                'dist_node_id': origin_id,
+                'edge_id': edge_id,
+                'cost_variable': float(cost_var or 0),
+                'distance': float(distance) if distance is not None else float('inf'),
+                'zone': str(zone) if zone is not None else None,
+            }
             if dest_id not in self._fulfillment_routes:
                 self._fulfillment_routes[dest_id] = []
-            self._fulfillment_routes[dest_id].append(
-                (origin_id, edge_id, float(cost_var or 0))
-            )
+            self._fulfillment_routes[dest_id].append(route)
+
+        # Rank routes — currently: nearest first
+        for dest_id in self._fulfillment_routes:
+            self._fulfillment_routes[dest_id].sort(key=self._route_sort_key)
 
         # Pre-load zone data for zone-derived edges
         zone_rows = self.conn.execute("""
@@ -244,6 +256,15 @@ class DrawdownEngine:
             logger.info(f"Loaded zone data for {len(self._edge_zones)} edges")
 
         logger.info(f"Built fulfillment routes for {len(self._fulfillment_routes)} demand nodes")
+
+    @staticmethod
+    def _route_sort_key(route: dict) -> tuple:
+        """Sort key for ranking fulfillment routes.
+
+        Currently: shortest distance first, then lowest cost as tiebreaker.
+        This method is the single point of control for fulfillment priority.
+        """
+        return (route['distance'], route['cost_variable'])
 
     def _run_time_steps(self):
         """Main simulation loop: iterate day by day."""
@@ -453,9 +474,13 @@ class DrawdownEngine:
         total_fulfilled = 0.0
         remaining = qty
 
-        for dist_node_id, edge_id, variable_cost in routes:
+        for route in routes:
             if remaining <= 0:
                 break
+
+            dist_node_id = route['dist_node_id']
+            edge_id = route['edge_id']
+            variable_cost = route['cost_variable']
 
             saleable_key = (dist_node_id, product_id, 'saleable')
             available = self._inventory.get(saleable_key, 0)
@@ -479,8 +504,9 @@ class DrawdownEngine:
             detail = {
                 'demand_node_id': demand_node_id,
                 'variable_cost_per_unit': variable_cost,
+                'distance': route['distance'],
             }
-            zone = self._edge_zones.get(edge_id)
+            zone = route.get('zone') or self._edge_zones.get(edge_id)
             if zone is not None:
                 detail['zone'] = zone
             self._log_event(sim_date, sim_step, event_type,
