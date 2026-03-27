@@ -91,7 +91,7 @@ class ConfigLoader:
     def _load_products_csv(path: Union[str, Path], frequency: str = 'H') -> List[ProductConfig]:
         """Load products from CSV file.
 
-        Required columns: part_number, annual_units, annual_orders
+        Required columns: product_id, annual_units, annual_orders
         All other columns are optional.
         """
         path = Path(path).expanduser()
@@ -100,8 +100,8 @@ class ConfigLoader:
         with open(path, 'r') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # Required fields
-                part_number = row['part_number'].strip()
+                # Required fields — support legacy 'part_number' column
+                product_id_val = row.get('product_id', row.get('part_number', '')).strip()
                 annual_units = float(row['annual_units'])
                 annual_orders = int(float(row['annual_orders']))
 
@@ -109,7 +109,7 @@ class ConfigLoader:
                 baseline_demand = ConfigLoader._annual_to_baseline(annual_units, frequency)
 
                 product = ProductConfig(
-                    product_id=part_number,
+                    product_id=product_id_val,
                     baseline_demand=baseline_demand,
                     annual_units=annual_units,
                     annual_orders=annual_orders,

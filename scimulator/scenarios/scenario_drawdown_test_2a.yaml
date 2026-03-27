@@ -1,0 +1,60 @@
+# Drawdown Test 2a — Overstock Test
+# Same as Test 2, but each node starts with 12 months' national demand per product.
+# Purpose: verify fulfillment logic under excess inventory (fill rate should be ~100%).
+
+scenario_id: "Drawdown Test 2a"
+name: "Overstock Drawdown - Q1 2026"
+description: "Overstock test: each node has 12 months national demand per product. Fill rate should approach 100%."
+currency_code: "USD"
+time_resolution: "daily"
+start_date: "2026-01-01"
+end_date: "2026-03-31"
+warm_up_days: 0
+backorder_probability: 0.8
+write_event_log: true
+write_snapshots: true
+snapshot_interval_days: 7
+dataset_version_id: "sample_v1"
+
+# Input files:
+
+product_csv: "scimulator/data/product_master_drawdown_test_2_100.csv"
+customer_csv: "scimulator/data/customer_drawdown_test_2_100.csv"
+demand_csv: "scimulator/data/dmd_drawdown_test_2_100.csv"
+
+distribution_nodes_csv: "scimulator/data/nodes_drawdown_test_2_10.csv"
+
+# Transport:
+
+zone_tables:
+  - name: parcel_zones
+    csv: './scimulator/utilities/output/zone_table-test_10.csv'
+    origin_key: origin_zip3
+    dest_key: dest_zip3
+
+edge_generation:
+  - origin_type: distribution
+    dest_type: demand
+    zone_table: parcel_zones
+    origin_node_attribute: zip3
+    dest_node_attribute: zip3
+    transport_type: parcel
+
+# Initial state — 12 months' national demand at every node, no inbound:
+
+initial_inventory_csv: "scimulator/data/initial_inventory-drawdown_test_2a.csv"
+
+suppliers:
+  - supplier_id: "SUP_DOMESTIC"
+    name: "Domestic Supplier"
+    default_lead_time: 1.0
+    default_qty_reliability: 1.0
+
+supply_nodes:
+  - supply_node_id: "SN_DOMESTIC_01"
+    supplier_id: "SUP_DOMESTIC"
+    name: "Domestic Factory"
+    latitude: 40.0
+    longitude: -82.5
+    tags: ["domestic"]
+    products: []

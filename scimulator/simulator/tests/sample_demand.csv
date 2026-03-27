@@ -1,4 +1,4 @@
-order_id,timestamp,part_number,customer_id,quantity
+order_id,timestamp,product_id,customer_id,quantity
 bfb86d62-4e2d-4122-97c2-c5f7af521a71,2024-01-01 07:26:10,B,C900,2
 c3a7ea10-48a4-48fc-b0d1-031aa1494909,2024-01-01 08:23:02,A,C606,1
 001c9036-6f1f-4f88-9ee6-8bceb556a56e,2024-01-01 08:44:03,D,C900,1

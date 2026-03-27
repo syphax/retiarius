@@ -11,7 +11,7 @@ Output:
 
     initial_inventory-{name}.csv
         dist_node_id  — Distribution node identifier (from node_file facility_code)
-        product_id    — Product identifier (from demand_file part_number)
+        product_id    — Product identifier (from demand_file product_id)
         quantity      — Starting inventory units
 
     inbound_schedule-{name}.csv
@@ -56,10 +56,10 @@ def load_demand(demand_file: str) -> dict[str, float]:
     df = pd.read_csv(demand_file)
 
     # Resolve product column
-    if 'part_number' in df.columns:
-        df['product_id'] = df['part_number']
+    if 'product_id' not in df.columns and 'product_id' in df.columns:
+        df.rename(columns={'product_id': 'product_id'}, inplace=True)
     elif 'product_id' not in df.columns:
-        raise ValueError("Demand CSV must have 'part_number' or 'product_id' column")
+        raise ValueError("Demand CSV must have 'product_id' column")
 
     # Resolve date column
     if 'timestamp' in df.columns:

@@ -2,7 +2,7 @@
 Results and KPI query API routes.
 """
 
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import PlainTextResponse
 
@@ -16,6 +16,7 @@ from ..services.query import (
     get_inventory_summary,
     get_inventory_timeseries,
     get_event_log_page,
+    get_event_filter_options,
 )
 
 router = APIRouter()
@@ -42,16 +43,30 @@ async def get_results_summary(scenario_id: str, db: str, request: Request):
         conn.close()
 
 
+@router.get("/results/{scenario_id}/events/filters")
+async def get_event_filters(scenario_id: str, db: str, request: Request):
+    """Distinct values for event log filter dropdowns."""
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        return get_event_filter_options(conn, scenario_id)
+    finally:
+        conn.close()
+
+
 @router.get("/results/{scenario_id}/events")
 async def get_events(
     scenario_id: str,
     db: str,
     request: Request,
-    event_type: Optional[str] = None,
-    product_id: Optional[str] = None,
-    node_id: Optional[str] = None,
+    event_type: List[str] = Query(None),
+    product_id: List[str] = Query(None),
+    origin_node_id: List[str] = Query(None),
+    dest_node_id: List[str] = Query(None),
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     limit: int = Query(100, le=10000),
     offset: int = Query(0, ge=0),
 ):
@@ -61,11 +76,14 @@ async def get_events(
     try:
         return get_event_log_page(
             conn, scenario_id,
-            event_type=event_type,
-            product_id=product_id,
-            node_id=node_id,
+            event_types=event_type or None,
+            product_ids=product_id or None,
+            origin_node_ids=origin_node_id or None,
+            dest_node_ids=dest_node_id or None,
             date_from=date_from,
             date_to=date_to,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
             limit=limit,
             offset=offset,
         )

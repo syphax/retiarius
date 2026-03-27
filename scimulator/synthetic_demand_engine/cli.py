@@ -17,14 +17,14 @@ def _plot_order_ledger(ledger):
     import matplotlib.pyplot as plt
     import pandas as pd
 
-    parts = sorted(ledger['part_number'].unique())
+    parts = sorted(ledger['product_id'].unique())
     fig, axes = plt.subplots(len(parts), 1, figsize=(14, 3 * len(parts)), sharex=True)
     if len(parts) == 1:
         axes = [axes]
 
     ts = pd.to_datetime(ledger['timestamp'])
     for ax, pn in zip(axes, parts):
-        mask = ledger['part_number'] == pn
+        mask = ledger['product_id'] == pn
         daily = ts[mask].dt.date.value_counts().sort_index()
         ax.bar(daily.index, daily.values, width=1.0, alpha=0.7)
         ax.set_ylabel('Orders/day')
@@ -127,8 +127,8 @@ def main():
         ledger = orchestrator.get_order_ledger()
         if ledger is not None and args.verbose:
             print(f"Generated {len(ledger)} order events")
-            for pn in ledger['part_number'].unique():
-                part_rows = ledger[ledger['part_number'] == pn]
+            for pn in ledger['product_id'].unique():
+                part_rows = ledger[ledger['product_id'] == pn]
                 print(f"  {pn}: {len(part_rows)} orders, {part_rows['quantity'].sum()} total units")
         elif args.verbose:
             print(f"Generated {len(demands)} demand patterns")

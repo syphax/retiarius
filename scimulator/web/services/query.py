@@ -205,49 +205,119 @@ def get_inventory_timeseries(
     }
 
 
+_VALID_SORT_COLS = {
+    'sim_date': 'el.sim_date',
+    'event_type': 'el.event_type',
+    'node_id': 'el.node_id',
+    'origin_node_id': 'e.origin_node_id',
+    'dest_node_id': 'e.dest_node_id',
+    'product_id': 'el.product_id',
+    'quantity': 'el.quantity',
+    'cost': 'el.cost',
+    'sim_step': 'el.sim_step',
+}
+
+
+def get_event_filter_options(
+    conn: duckdb.DuckDBPyConnection,
+    scenario_id: str,
+) -> Dict:
+    """Distinct values for event log filter dropdowns."""
+    event_types = [r[0] for r in conn.execute(
+        "SELECT DISTINCT event_type FROM event_log WHERE scenario_id = ? ORDER BY event_type",
+        [scenario_id],
+    ).fetchall()]
+
+    products = [r[0] for r in conn.execute(
+        "SELECT DISTINCT product_id FROM event_log WHERE scenario_id = ? AND product_id IS NOT NULL ORDER BY product_id",
+        [scenario_id],
+    ).fetchall()]
+
+    # Origin and dest nodes come from the edge table join
+    origin_nodes = [r[0] for r in conn.execute("""
+        SELECT DISTINCT e.origin_node_id
+        FROM event_log el
+        JOIN edge e ON el.edge_id = e.edge_id
+        WHERE el.scenario_id = ? AND e.origin_node_id IS NOT NULL
+        ORDER BY e.origin_node_id
+    """, [scenario_id]).fetchall()]
+
+    dest_nodes = [r[0] for r in conn.execute("""
+        SELECT DISTINCT e.dest_node_id
+        FROM event_log el
+        JOIN edge e ON el.edge_id = e.edge_id
+        WHERE el.scenario_id = ? AND e.dest_node_id IS NOT NULL
+        ORDER BY e.dest_node_id
+    """, [scenario_id]).fetchall()]
+
+    return {
+        "event_types": event_types,
+        "products": products,
+        "origin_nodes": origin_nodes,
+        "dest_nodes": dest_nodes,
+    }
+
+
 def get_event_log_page(
     conn: duckdb.DuckDBPyConnection,
     scenario_id: str,
-    event_type: Optional[str] = None,
-    product_id: Optional[str] = None,
-    node_id: Optional[str] = None,
+    event_types: Optional[List[str]] = None,
+    product_ids: Optional[List[str]] = None,
+    origin_node_ids: Optional[List[str]] = None,
+    dest_node_ids: Optional[List[str]] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_dir: str = "asc",
     limit: int = 100,
     offset: int = 0,
 ) -> Dict:
     """Paginated, filterable event log."""
-    conditions = ["scenario_id = ?"]
+    conditions = ["el.scenario_id = ?"]
     params: List[Any] = [scenario_id]
 
-    if event_type:
-        conditions.append("event_type = ?")
-        params.append(event_type)
-    if product_id:
-        conditions.append("product_id = ?")
-        params.append(product_id)
-    if node_id:
-        conditions.append("node_id = ?")
-        params.append(node_id)
+    if event_types:
+        placeholders = ", ".join(["?"] * len(event_types))
+        conditions.append(f"el.event_type IN ({placeholders})")
+        params.extend(event_types)
+    if product_ids:
+        placeholders = ", ".join(["?"] * len(product_ids))
+        conditions.append(f"el.product_id IN ({placeholders})")
+        params.extend(product_ids)
+    if origin_node_ids:
+        placeholders = ", ".join(["?"] * len(origin_node_ids))
+        conditions.append(f"e.origin_node_id IN ({placeholders})")
+        params.extend(origin_node_ids)
+    if dest_node_ids:
+        placeholders = ", ".join(["?"] * len(dest_node_ids))
+        conditions.append(f"e.dest_node_id IN ({placeholders})")
+        params.extend(dest_node_ids)
     if date_from:
-        conditions.append("sim_date >= ?")
+        conditions.append("el.sim_date >= ?")
         params.append(date_from)
     if date_to:
-        conditions.append("sim_date <= ?")
+        conditions.append("el.sim_date <= ?")
         params.append(date_to)
 
     where = " AND ".join(conditions)
 
     # Get total count
-    total = conn.execute(
-        f"SELECT COUNT(*) FROM event_log WHERE {where}", params
-    ).fetchone()[0]
-
-    # Get page
-    rows = conn.execute(f"""
-        SELECT * FROM event_log
+    count_conditions = [c for c in conditions]
+    total = conn.execute(f"""
+        SELECT COUNT(*) FROM event_log el
+        LEFT JOIN edge e ON el.edge_id = e.edge_id
         WHERE {where}
-        ORDER BY sim_step, event_type
+    """, params).fetchone()[0]
+
+    # Get page — join edge table to resolve origin/destination nodes
+    rows = conn.execute(f"""
+        SELECT el.*,
+               e.origin_node_id, e.origin_node_type,
+               e.dest_node_id, e.dest_node_type
+        FROM event_log el
+        LEFT JOIN edge e ON el.edge_id = e.edge_id
+        WHERE {where}
+        ORDER BY {_VALID_SORT_COLS.get(sort_by, 'el.sim_step')} {sort_dir.upper()}, el.sim_step ASC
         LIMIT ? OFFSET ?
     """, params + [limit, offset]).fetchall()
 

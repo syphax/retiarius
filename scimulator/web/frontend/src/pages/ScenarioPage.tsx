@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   getResultsSummary,
   getEvents as getEventsApi,
+  getEventFilterOptions,
   eventsExportUrl,
   snapshotsExportUrl,
   databaseExportUrl,
 } from '../api/client'
-import type { ResultsSummary } from '../api/client'
+import type { ResultsSummary, EventFilterOptions } from '../api/client'
 import InventoryChart from '../components/InventoryChart'
 
 export default function ScenarioPage() {
@@ -198,18 +199,99 @@ function KpiCard({ label, value }: { label: string; value: string }) {
   )
 }
 
+function MultiSelect({ label, options, selected, onChange }: {
+  label: string
+  options: string[]
+  selected: string[]
+  onChange: (vals: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const toggle = (val: string) => {
+    onChange(selected.includes(val) ? selected.filter(v => v !== val) : [...selected, val])
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <label>{label}: </label>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        style={{
+          minWidth: 100, textAlign: 'left', padding: '2px 6px',
+          background: 'var(--bg-secondary, #fff)', border: '1px solid var(--border, #ccc)',
+          borderRadius: 4, cursor: 'pointer', fontSize: 13,
+        }}
+      >
+        {selected.length === 0 ? 'All' : `${selected.length} selected`}
+        {' \u25BE'}
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, zIndex: 100,
+          background: 'var(--bg-primary, #fff)', border: '1px solid var(--border, #ccc)',
+          borderRadius: 4, maxHeight: 240, overflowY: 'auto', minWidth: 180,
+          boxShadow: '0 4px 12px rgba(0,0,0,.15)',
+        }}>
+          {selected.length > 0 && (
+            <div
+              style={{ padding: '4px 8px', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', borderBottom: '1px solid var(--border, #eee)' }}
+              onClick={() => onChange([])}
+            >
+              Clear all
+            </div>
+          )}
+          {options.map(opt => (
+            <label key={opt} style={{ display: 'flex', alignItems: 'center', padding: '3px 8px', cursor: 'pointer', fontSize: 13, gap: 6 }}>
+              <input type="checkbox" checked={selected.includes(opt)} onChange={() => toggle(opt)} />
+              {opt}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EventLog({ dbName, scenarioId }: { dbName: string; scenarioId: string }) {
   const [events, setEvents] = useState<Record<string, unknown>[]>([])
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
-  const [eventType, setEventType] = useState('')
+  const [filterOpts, setFilterOpts] = useState<EventFilterOptions | null>(null)
+  const [eventTypes, setEventTypes] = useState<string[]>([])
+  const [productIds, setProductIds] = useState<string[]>([])
+  const [originNodeIds, setOriginNodeIds] = useState<string[]>([])
+  const [destNodeIds, setDestNodeIds] = useState<string[]>([])
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [sortBy, setSortBy] = useState('')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [loading, setLoading] = useState(true)
   const limit = 50
 
   useEffect(() => {
+    getEventFilterOptions(dbName, scenarioId).then(setFilterOpts)
+  }, [dbName, scenarioId])
+
+  useEffect(() => {
     setLoading(true)
-    const params: Record<string, string | number> = { limit, offset }
-    if (eventType) params.event_type = eventType
+    const params: Record<string, string | number | string[]> = { limit, offset }
+    if (eventTypes.length) params.event_type = eventTypes
+    if (productIds.length) params.product_id = productIds
+    if (originNodeIds.length) params.origin_node_id = originNodeIds
+    if (destNodeIds.length) params.dest_node_id = destNodeIds
+    if (dateFrom) params.date_from = dateFrom
+    if (dateTo) params.date_to = dateTo
+    if (sortBy) { params.sort_by = sortBy; params.sort_dir = sortDir }
 
     getEventsApi(dbName, scenarioId, params)
       .then(page => {
@@ -217,19 +299,41 @@ function EventLog({ dbName, scenarioId }: { dbName: string; scenarioId: string }
         setTotal(page.total)
         setLoading(false)
       })
-  }, [dbName, scenarioId, offset, eventType])
+  }, [dbName, scenarioId, offset, eventTypes, productIds, originNodeIds, destNodeIds, dateFrom, dateTo, sortBy, sortDir])
+
+  const handleSort = (col: string) => {
+    if (sortBy === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(col)
+      setSortDir('asc')
+    }
+    setOffset(0)
+  }
+
+  const sortIcon = (col: string) => sortBy === col ? (sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : ''
+
+  const setFilterAndReset = <T,>(setter: (v: T) => void) => (v: T) => { setter(v); setOffset(0) }
 
   return (
     <div>
-      <div className="event-filters">
-        <label>Event type: </label>
-        <select value={eventType} onChange={e => { setEventType(e.target.value); setOffset(0) }}>
-          <option value="">All</option>
-          {['demand_received', 'demand_fulfilled', 'backorder_created', 'backorder_fulfilled',
-            'lost_sale', 'shipment_arrived', 'inventory_received', 'fixed_cost'].map(t => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
+      <div className="event-filters" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '8px' }}>
+        {filterOpts && (
+          <>
+            <MultiSelect label="Type" options={filterOpts.event_types} selected={eventTypes} onChange={setFilterAndReset(setEventTypes)} />
+            <MultiSelect label="From" options={filterOpts.origin_nodes} selected={originNodeIds} onChange={setFilterAndReset(setOriginNodeIds)} />
+            <MultiSelect label="To" options={filterOpts.dest_nodes} selected={destNodeIds} onChange={setFilterAndReset(setDestNodeIds)} />
+            <MultiSelect label="Product" options={filterOpts.products} selected={productIds} onChange={setFilterAndReset(setProductIds)} />
+          </>
+        )}
+        <label>
+          From: <input type="date" value={dateFrom}
+            onChange={e => { setDateFrom(e.target.value); setOffset(0) }} />
+        </label>
+        <label>
+          To: <input type="date" value={dateTo}
+            onChange={e => { setDateTo(e.target.value); setOffset(0) }} />
+        </label>
         <span className="event-count">{total.toLocaleString()} events</span>
       </div>
 
@@ -238,8 +342,14 @@ function EventLog({ dbName, scenarioId }: { dbName: string; scenarioId: string }
           <table className="data-table compact">
             <thead>
               <tr>
-                <th>Step</th><th>Date</th><th>Type</th><th>Node</th>
-                <th>Product</th><th>Qty</th><th>Cost</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('sim_step')}>Step{sortIcon('sim_step')}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('sim_date')}>Date{sortIcon('sim_date')}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('event_type')}>Type{sortIcon('event_type')}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('origin_node_id')}>From{sortIcon('origin_node_id')}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('dest_node_id')}>To{sortIcon('dest_node_id')}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('product_id')}>Product{sortIcon('product_id')}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('quantity')}>Qty{sortIcon('quantity')}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => handleSort('cost')}>Cost{sortIcon('cost')}</th>
               </tr>
             </thead>
             <tbody>
@@ -248,7 +358,8 @@ function EventLog({ dbName, scenarioId }: { dbName: string; scenarioId: string }
                   <td>{String(e.sim_step)}</td>
                   <td>{String(e.sim_date)}</td>
                   <td>{String(e.event_type)}</td>
-                  <td>{String(e.node_id || '-')}</td>
+                  <td>{String(e.origin_node_id || e.node_id || '-')}</td>
+                  <td>{String(e.dest_node_id || '-')}</td>
                   <td>{String(e.product_id || '-')}</td>
                   <td>{e.quantity != null ? Number(e.quantity).toLocaleString() : '-'}</td>
                   <td>{e.cost != null ? `$${Number(e.cost).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}</td>

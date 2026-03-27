@@ -37,7 +37,7 @@ class OrderEventGenerator:
     ) -> pd.DataFrame:
         """Generate a complete order ledger for all products across the date range.
 
-        Returns a DataFrame with columns: order_id, timestamp, part_number, zip3, quantity
+        Returns a DataFrame with columns: order_id, timestamp, product_id, zip3, quantity
         """
         start = pd.Timestamp(start_date)
         end = pd.Timestamp(end_date)
@@ -81,7 +81,7 @@ class OrderEventGenerator:
             product_orders = pd.DataFrame({
                 'order_id': order_ids,
                 'timestamp': timestamps,
-                'part_number': product.product_id,
+                'product_id': product.product_id,
                 'zip3': zip3_assignments,
                 'quantity': quantities,
             })
@@ -89,7 +89,7 @@ class OrderEventGenerator:
             all_orders.append(product_orders)
 
         if not all_orders:
-            return pd.DataFrame(columns=['order_id', 'timestamp', 'part_number', 'zip3', 'quantity'])
+            return pd.DataFrame(columns=['order_id', 'timestamp', 'product_id', 'zip3', 'quantity'])
 
         ledger = pd.concat(all_orders, ignore_index=True)
         ledger = ledger.sort_values('timestamp').reset_index(drop=True)

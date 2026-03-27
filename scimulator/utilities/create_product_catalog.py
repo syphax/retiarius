@@ -8,7 +8,7 @@ Usage:
 
 Output:
     Writes a CSV to scimulator/utilities/output/products-{name}.csv with columns:
-        part_number   — Sequential alphabetic identifier (e.g. AAAA, AAAB, ...)
+        product_id   — Sequential alphabetic identifier (e.g. AAAA, AAAB, ...)
         annual_units  — Simulated annual unit demand for this product
         annual_orders — Simulated annual order count for this product
 
@@ -38,7 +38,7 @@ import numpy as np
 import yaml
 
 
-def generate_part_numbers(count: int, length: int) -> list[str]:
+def generate_product_ids(count: int, length: int) -> list[str]:
     """Generate sequential alphabetic part numbers (AAA, AAB, AAC, ...)."""
     max_parts = 26 ** length
     if count > max_parts:
@@ -47,15 +47,15 @@ def generate_part_numbers(count: int, length: int) -> list[str]:
             f"(max {max_parts})"
         )
 
-    part_numbers = []
+    product_ids = []
     for i in range(count):
         chars = []
         n = i
         for _ in range(length):
             chars.append(string.ascii_uppercase[n % 26])
             n //= 26
-        part_numbers.append("".join(reversed(chars)))
-    return part_numbers
+        product_ids.append("".join(reversed(chars)))
+    return product_ids
 
 
 def log_logistic_pdf(x: np.ndarray, k: float, x0: float) -> np.ndarray:
@@ -148,7 +148,7 @@ def main():
     order_ratio = config.get("qty_per_order_ratio", 1.0)
 
     # Generate
-    part_numbers = generate_part_numbers(count, length)
+    product_ids = generate_product_ids(count, length)
     demand = compute_demand(count, total_units, curve_shape, shape_params, noise_factor, rng)
     orders = compute_orders(demand, order_mode, order_ratio)
 
@@ -159,8 +159,8 @@ def main():
 
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["part_number", "annual_units", "annual_orders"])
-        for pn, units, ords in zip(part_numbers, demand, orders):
+        writer.writerow(["product_id", "annual_units", "annual_orders"])
+        for pn, units, ords in zip(product_ids, demand, orders):
             writer.writerow([pn, units, ords])
 
     print(f"Created {count} products in {output_path}")

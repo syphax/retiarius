@@ -146,14 +146,33 @@ export interface EventPage {
   events: Record<string, unknown>[];
 }
 
+export interface EventFilterOptions {
+  event_types: string[];
+  products: string[];
+  origin_nodes: string[];
+  dest_nodes: string[];
+}
+
+export function getEventFilterOptions(
+  dbName: string,
+  scenarioId: string,
+): Promise<EventFilterOptions> {
+  return fetchJson(`${BASE}/results/${encodeURIComponent(scenarioId)}/events/filters?db=${encodeURIComponent(dbName)}`);
+}
+
 export function getEvents(
   dbName: string,
   scenarioId: string,
-  params: Record<string, string | number> = {},
+  params: Record<string, string | number | string[]> = {},
 ): Promise<EventPage> {
   const search = new URLSearchParams({ db: dbName });
   for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== '') search.set(k, String(v));
+    if (v === undefined || v === '') continue;
+    if (Array.isArray(v)) {
+      for (const item of v) search.append(k, item);
+    } else {
+      search.set(k, String(v));
+    }
   }
   return fetchJson(`${BASE}/results/${encodeURIComponent(scenarioId)}/events?${search}`);
 }

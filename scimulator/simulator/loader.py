@@ -231,18 +231,26 @@ def _load_customers(conn, config: ScenarioConfig):
             raise ValueError("Customer CSV must have 'customer_id' and 'demand_node_id' columns")
 
         # Auto-create demand nodes from customer data
-        # Derive zip3 from the first customer's postal_code per demand node
-        dn_df = df.groupby('demand_node_id').first().reset_index()[['demand_node_id']]
+        # Use first customer per demand node for zip3 and coordinates
+        first_per_dn = df.groupby('demand_node_id').first().reset_index()
+        dn_df = first_per_dn[['demand_node_id']].copy()
         dn_df['name'] = dn_df['demand_node_id']
-        if 'postal_code' in df.columns:
-            zip3_map = df.dropna(subset=['postal_code']).groupby(
-                'demand_node_id')['postal_code'].first()
-            dn_df['zip3'] = dn_df['demand_node_id'].map(zip3_map)
-        else:
-            dn_df['zip3'] = None
+        dn_df['zip3'] = first_per_dn['postal_code'] if 'postal_code' in first_per_dn.columns else None
+        dn_df['latitude'] = first_per_dn['latitude'] if 'latitude' in first_per_dn.columns else None
+        dn_df['longitude'] = first_per_dn['longitude'] if 'longitude' in first_per_dn.columns else None
         conn.execute("""
-            INSERT OR IGNORE INTO demand_node (demand_node_id, name, zip3)
-            SELECT demand_node_id, name, zip3 FROM dn_df
+            INSERT OR IGNORE INTO demand_node (demand_node_id, name, latitude, longitude, zip3)
+            SELECT demand_node_id, name, latitude, longitude, zip3 FROM dn_df
+        """)
+        # Update lat/lon on existing demand nodes that lack coordinates
+        conn.execute("""
+            UPDATE demand_node dn SET
+                latitude = dn_df.latitude,
+                longitude = dn_df.longitude,
+                zip3 = COALESCE(dn.zip3, dn_df.zip3)
+            FROM dn_df
+            WHERE dn.demand_node_id = dn_df.demand_node_id
+              AND dn.latitude IS NULL AND dn_df.latitude IS NOT NULL
         """)
 
         insert_df = pd.DataFrame({
@@ -369,8 +377,8 @@ def _load_products(conn, config: ScenarioConfig):
         csv_path = _resolve_csv(config.product_csv)
         df = pd.read_csv(csv_path)
 
-        if 'part_number' in df.columns and 'product_id' not in df.columns:
-            df['product_id'] = df['part_number']
+        if 'product_id' not in df.columns and 'part_number' in df.columns:
+            df.rename(columns={'part_number': 'product_id'}, inplace=True)
 
         insert_df = pd.DataFrame({
             'product_id': df['product_id'],
@@ -451,10 +459,10 @@ def _load_demand(conn, config: ScenarioConfig):
         raise ValueError("Demand CSV must have 'timestamp' or 'demand_date' column")
 
     # Map product column
-    if 'part_number' in df.columns:
-        df['product_id'] = df['part_number']
+    if 'product_id' not in df.columns and 'part_number' in df.columns:
+        df.rename(columns={'part_number': 'product_id'}, inplace=True)
     elif 'product_id' not in df.columns:
-        raise ValueError("Demand CSV must have 'part_number' or 'product_id' column")
+        raise ValueError("Demand CSV must have 'product_id' column")
 
     # Generate demand_id if not present
     if 'demand_id' not in df.columns:

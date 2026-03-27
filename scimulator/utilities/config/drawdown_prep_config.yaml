@@ -12,7 +12,7 @@
 #                       initial_inventory-{name}.csv and inbound_schedule-{name}.csv.
 #
 #   demand_file       — Path to demand CSV (from synthetic demand engine).
-#                       Expected columns: timestamp|demand_date, part_number|product_id,
+#                       Expected columns: timestamp|demand_date, product_id,
 #                       quantity. Used to compute monthly demand per product.
 #
 #   node_file         — Path to node CSV listing active distribution nodes.
