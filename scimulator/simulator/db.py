@@ -185,6 +185,20 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
     """)
 
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS customer (
+            customer_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            demand_node_id TEXT NOT NULL,
+            street_address TEXT,
+            state_province TEXT,
+            country TEXT,
+            postal_code TEXT,
+            latitude DECIMAL(9,6),
+            longitude DECIMAL(9,6)
+        )
+    """)
+
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS edge (
             edge_id TEXT PRIMARY KEY,
             origin_node_id TEXT NOT NULL,

@@ -15,6 +15,7 @@ write_event_log: true
 write_snapshots: true
 snapshot_interval_days: 7
 dataset_version_id: "sample_v1"
+customer_csv: "scimulator/simulator/tests/sample_customers.csv"
 demand_csv: "scimulator/simulator/tests/sample_demand.csv"
 
 suppliers:

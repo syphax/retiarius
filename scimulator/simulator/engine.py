@@ -16,6 +16,7 @@ from typing import Dict, List, Tuple, Optional
 
 import duckdb
 import numpy as np
+import polars as pl
 
 from . import __version__
 
@@ -287,10 +288,6 @@ class DrawdownEngine:
         # 7. Write inventory snapshot (if enabled and on schedule)
         if self.write_snapshots and sim_step % self.snapshot_interval == 0:
             self._write_snapshot(sim_date)
-
-        # Periodically flush event buffer
-        if len(self._event_buffer) >= 5000:
-            self._flush_events()
 
     def _process_inbound_arrivals(self, sim_date: date, sim_step: int):
         """Process scheduled inbound shipments arriving today.
@@ -659,13 +656,26 @@ class DrawdownEngine:
         ))
 
     def _flush_events(self):
-        """Batch insert buffered events into DuckDB."""
+        """Bulk insert all buffered events into DuckDB via Polars."""
         if not self._event_buffer:
             return
 
-        self.conn.executemany("""
-            INSERT INTO event_log VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, self._event_buffer)
+        df = pl.DataFrame(
+            self._event_buffer,
+            schema={
+                'scenario_id': pl.Utf8, 'event_id': pl.Int64,
+                'sim_date': pl.Date, 'sim_step': pl.Int32,
+                'event_type': pl.Utf8, 'node_id': pl.Utf8,
+                'node_type': pl.Utf8, 'edge_id': pl.Utf8,
+                'product_id': pl.Utf8, 'quantity': pl.Float64,
+                'from_state': pl.Utf8, 'to_state': pl.Utf8,
+                'demand_id': pl.Utf8, 'cost': pl.Float64,
+                'detail': pl.Utf8,
+            },
+            orient='row',
+        )
+        self.conn.execute("INSERT INTO event_log SELECT * FROM df")
+        logger.info(f"Flushed {len(self._event_buffer)} events")
         self._event_buffer.clear()
 
     def _write_snapshot(self, sim_date: date):
@@ -690,15 +700,21 @@ class DrawdownEngine:
                 state, qty, total_cube, cube_uom,
             ))
 
-        if len(self._snapshot_buffer) >= 5000:
-            self._flush_snapshots()
-
     def _flush_snapshots(self):
-        """Batch insert buffered snapshots into DuckDB."""
+        """Bulk insert all buffered snapshots into DuckDB via Polars."""
         if not self._snapshot_buffer:
             return
 
-        self.conn.executemany("""
-            INSERT INTO inventory_snapshot VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, self._snapshot_buffer)
+        df = pl.DataFrame(
+            self._snapshot_buffer,
+            schema={
+                'scenario_id': pl.Utf8, 'sim_date': pl.Date,
+                'dist_node_id': pl.Utf8, 'product_id': pl.Utf8,
+                'inventory_state': pl.Utf8, 'quantity': pl.Float64,
+                'total_cube': pl.Float64, 'total_cube_uom': pl.Utf8,
+            },
+            orient='row',
+        )
+        self.conn.execute("INSERT INTO inventory_snapshot SELECT * FROM df")
+        logger.info(f"Flushed {len(self._snapshot_buffer)} snapshot rows")
         self._snapshot_buffer.clear()

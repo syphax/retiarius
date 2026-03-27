@@ -74,6 +74,19 @@ class DemandNodeConfig:
 
 
 @dataclass
+class CustomerConfig:
+    customer_id: str
+    name: str
+    demand_node_id: str
+    street_address: Optional[str] = None
+    state_province: Optional[str] = None
+    country: Optional[str] = None
+    postal_code: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+
+@dataclass
 class EdgeConfig:
     edge_id: str
     origin_node_id: str
@@ -172,6 +185,7 @@ class ScenarioConfig:
     supply_nodes: List[SupplyNodeConfig] = field(default_factory=list)
     distribution_nodes: List[DistributionNodeConfig] = field(default_factory=list)
     demand_nodes: List[DemandNodeConfig] = field(default_factory=list)
+    customers: List[CustomerConfig] = field(default_factory=list)
     edges: List[EdgeConfig] = field(default_factory=list)
 
     # Products
@@ -183,6 +197,7 @@ class ScenarioConfig:
     inbound_schedule_csv: Optional[str] = None  # Path to inbound schedule CSV
     initial_inventory_csv: Optional[str] = None  # Path to initial inventory CSV
     product_csv: Optional[str] = None  # Path to product master CSV
+    customer_csv: Optional[str] = None  # Path to customer CSV
     distribution_nodes_csv: Optional[str] = None  # Path to distribution nodes CSV
     edge_csvs: List[str] = field(default_factory=list)  # Paths to edge CSVs
     zone_tables: List[ZoneTableConfig] = field(default_factory=list)

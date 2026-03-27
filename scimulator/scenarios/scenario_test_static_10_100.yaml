@@ -21,6 +21,7 @@ dataset_version_id: "sample_v1"
 # Input files:
 
 product_csv: "scimulator/data/product_master_drawdown_test_2_100.csv"
+customer_csv: "scimulator/data/customer_drawdown_test_2_100.csv"
 demand_csv: "scimulator/data/dmd_drawdown_test_2_100.csv"
 
 distribution_nodes_csv: "scimulator/data/nodes_drawdown_test_2_10.csv"

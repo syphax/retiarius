@@ -20,7 +20,7 @@ import pandas as pd
 from .models import ScenarioConfig, SupplierConfig, SupplyNodeConfig
 from .models import DistributionNodeConfig, DemandNodeConfig, EdgeConfig
 from .models import ProductConfig, InboundShipment, InitialInventory
-from .models import ZoneTableConfig, EdgeGenerationConfig
+from .models import ZoneTableConfig, EdgeGenerationConfig, CustomerConfig
 from .db import create_database, open_database
 from .edge_builders import build_edges_from_zones
 
@@ -49,6 +49,7 @@ def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
     products = [ProductConfig(**p) for p in raw.get('products', [])]
     inbound_schedule = [InboundShipment(**i) for i in raw.get('inbound_schedule', [])]
     initial_inventory = [InitialInventory(**i) for i in raw.get('initial_inventory', [])]
+    customers = [CustomerConfig(**c) for c in raw.get('customers', [])]
     zone_tables = [ZoneTableConfig(**z) for z in raw.get('zone_tables', [])]
     edge_generation = [EdgeGenerationConfig(**e) for e in raw.get('edge_generation', [])]
 
@@ -58,8 +59,8 @@ def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
         'start_date', 'end_date', 'warm_up_days', 'backorder_probability',
         'write_event_log', 'write_snapshots', 'snapshot_interval_days',
         'dataset_version_id', 'demand_csv', 'inbound_schedule_csv',
-        'initial_inventory_csv', 'product_csv', 'distribution_nodes_csv',
-        'edge_csvs',
+        'initial_inventory_csv', 'product_csv', 'customer_csv',
+        'distribution_nodes_csv', 'edge_csvs',
         'params', 'notes',
         'product_set_id', 'supply_node_set_id', 'distribution_node_set_id',
         'demand_node_set_id', 'edge_set_id',
@@ -72,6 +73,7 @@ def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
         supply_nodes=supply_nodes,
         distribution_nodes=distribution_nodes,
         demand_nodes=demand_nodes,
+        customers=customers,
         edges=edges,
         products=products,
         inbound_schedule=inbound_schedule,
@@ -96,6 +98,7 @@ def load_scenario_into_db(config: ScenarioConfig, db_path: str) -> duckdb.DuckDB
     _load_supply_nodes(conn, config)
     _load_distribution_nodes(conn, config)
     _load_demand_nodes(conn, config)
+    _load_customers(conn, config)
     _load_edges(conn, config)
     _load_zone_tables(conn, config)
     _load_products(conn, config)
@@ -211,6 +214,58 @@ def _load_demand_nodes(conn, config: ScenarioConfig):
         conn.execute("""
             INSERT OR REPLACE INTO demand_node VALUES (?, ?, ?, ?, ?)
         """, [d.demand_node_id, d.name, d.latitude, d.longitude, d.zip3])
+
+
+def _load_customers(conn, config: ScenarioConfig):
+    """Load customer data from CSV and/or inline YAML.
+
+    Also auto-creates demand nodes for any demand_node_id referenced by
+    customers that doesn't already exist.
+    """
+    if config.customer_csv:
+        csv_path = _resolve_csv(config.customer_csv)
+        df = pd.read_csv(csv_path, dtype={'postal_code': str})
+
+        # Ensure required columns
+        if 'customer_id' not in df.columns or 'demand_node_id' not in df.columns:
+            raise ValueError("Customer CSV must have 'customer_id' and 'demand_node_id' columns")
+
+        # Auto-create demand nodes from customer data
+        dn_df = df[['demand_node_id']].drop_duplicates().copy()
+        dn_df['name'] = dn_df['demand_node_id']
+        conn.execute("""
+            INSERT OR IGNORE INTO demand_node (demand_node_id, name)
+            SELECT demand_node_id, name FROM dn_df
+        """)
+
+        insert_df = pd.DataFrame({
+            'customer_id': df['customer_id'],
+            'name': df.get('name', df['customer_id']),
+            'demand_node_id': df['demand_node_id'],
+            'street_address': df.get('street_address'),
+            'state_province': df.get('state_province'),
+            'country': df.get('country'),
+            'postal_code': df.get('postal_code'),
+            'latitude': df.get('latitude'),
+            'longitude': df.get('longitude'),
+        })
+        conn.execute("INSERT OR REPLACE INTO customer SELECT * FROM insert_df")
+        logger.info(f"Loaded {len(df)} customers from {csv_path}")
+
+    for c in config.customers:
+        # Auto-create demand node if needed
+        conn.execute("""
+            INSERT OR IGNORE INTO demand_node (demand_node_id, name)
+            VALUES (?, ?)
+        """, [c.demand_node_id, c.demand_node_id])
+
+        conn.execute("""
+            INSERT OR REPLACE INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            c.customer_id, c.name, c.demand_node_id,
+            c.street_address, c.state_province, c.country,
+            c.postal_code, c.latitude, c.longitude,
+        ])
 
 
 def _load_edges(conn, config: ScenarioConfig):
@@ -358,25 +413,25 @@ def _load_demand(conn, config: ScenarioConfig):
     df = pd.read_csv(csv_path)
     logger.info(f"Loading {len(df)} demand rows from {csv_path}")
 
-    # Map zip3 to demand_node_id (prefixed with Z for ZIP3 aggregation)
-    if 'zip3' in df.columns:
-        df['demand_node_id'] = 'Z' + df['zip3'].astype(str).str.zfill(3)
+    # Resolve demand_node_id from customer_id, zip3, or direct column
+    if 'customer_id' in df.columns:
+        # Look up demand_node_id via customer table
+        customer_map = dict(conn.execute(
+            "SELECT customer_id, demand_node_id FROM customer"
+        ).fetchall())
+        df['customer_id_str'] = df['customer_id'].astype(str)
+        df['demand_node_id'] = df['customer_id_str'].map(customer_map)
+        unmapped = df['demand_node_id'].isna().sum()
+        if unmapped > 0:
+            missing = df.loc[df['demand_node_id'].isna(), 'customer_id_str'].unique()[:5]
+            raise ValueError(
+                f"{unmapped} demand rows have customer_id not found in customer table. "
+                f"Examples: {list(missing)}")
     elif 'demand_node_id' in df.columns:
         pass
     else:
-        raise ValueError("Demand CSV must have 'zip3' or 'demand_node_id' column")
-
-    # Auto-create demand nodes from zip3 data
-    if 'zip3' in df.columns:
-        unique_zip3s = df[['zip3', 'demand_node_id']].drop_duplicates()
-        unique_zip3s['name'] = 'ZIP3 ' + unique_zip3s['zip3'].astype(str)
-        unique_zip3s['zip3_str'] = unique_zip3s['zip3'].astype(str)
-        demand_nodes_df = unique_zip3s[['demand_node_id', 'name', 'zip3_str']].copy()
-        demand_nodes_df.columns = ['demand_node_id', 'name', 'zip3']
-        conn.execute("""
-            INSERT OR IGNORE INTO demand_node (demand_node_id, name, zip3)
-            SELECT demand_node_id, name, zip3 FROM demand_nodes_df
-        """)
+        raise ValueError(
+            "Demand CSV must have 'customer_id' or 'demand_node_id' column")
 
     # Parse timestamps
     if 'timestamp' in df.columns:
