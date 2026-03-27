@@ -231,11 +231,18 @@ def _load_customers(conn, config: ScenarioConfig):
             raise ValueError("Customer CSV must have 'customer_id' and 'demand_node_id' columns")
 
         # Auto-create demand nodes from customer data
-        dn_df = df[['demand_node_id']].drop_duplicates().copy()
+        # Derive zip3 from the first customer's postal_code per demand node
+        dn_df = df.groupby('demand_node_id').first().reset_index()[['demand_node_id']]
         dn_df['name'] = dn_df['demand_node_id']
+        if 'postal_code' in df.columns:
+            zip3_map = df.dropna(subset=['postal_code']).groupby(
+                'demand_node_id')['postal_code'].first()
+            dn_df['zip3'] = dn_df['demand_node_id'].map(zip3_map)
+        else:
+            dn_df['zip3'] = None
         conn.execute("""
-            INSERT OR IGNORE INTO demand_node (demand_node_id, name)
-            SELECT demand_node_id, name FROM dn_df
+            INSERT OR IGNORE INTO demand_node (demand_node_id, name, zip3)
+            SELECT demand_node_id, name, zip3 FROM dn_df
         """)
 
         insert_df = pd.DataFrame({
@@ -255,9 +262,9 @@ def _load_customers(conn, config: ScenarioConfig):
     for c in config.customers:
         # Auto-create demand node if needed
         conn.execute("""
-            INSERT OR IGNORE INTO demand_node (demand_node_id, name)
-            VALUES (?, ?)
-        """, [c.demand_node_id, c.demand_node_id])
+            INSERT OR IGNORE INTO demand_node (demand_node_id, name, zip3)
+            VALUES (?, ?, ?)
+        """, [c.demand_node_id, c.demand_node_id, c.postal_code])
 
         conn.execute("""
             INSERT OR REPLACE INTO customer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
