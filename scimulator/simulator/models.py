@@ -169,6 +169,7 @@ class ScenarioConfig:
     """Top-level scenario configuration. Maps to a YAML file."""
     scenario_id: str
     name: str
+    database: Optional[str] = None  # Target DB filename (without extension); omit to derive from YAML path
     description: str = ""
     currency_code: str = "USD"
     time_resolution: str = "daily"

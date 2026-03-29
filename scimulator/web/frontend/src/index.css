@@ -334,6 +334,74 @@ select {
   padding: 40px 20px;
 }
 
+/* Collapsible sections */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.section-chevron {
+  font-size: 10px;
+  color: var(--text-muted);
+  width: 14px;
+  display: inline-block;
+}
+.section-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+.section-controls-sep {
+  color: var(--text-muted);
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent-light);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+/* Row action buttons */
+.row-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.icon-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.icon-btn:hover {
+  color: var(--text-h);
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.icon-btn-danger:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .app-main { padding: 16px; }

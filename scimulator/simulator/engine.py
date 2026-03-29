@@ -194,7 +194,7 @@ class DrawdownEngine:
         """
         query = """
             SELECT e.edge_id, e.origin_node_id, e.dest_node_id,
-                   e.cost_variable, e.distance,
+                   e.cost_variable, e.distance, e.mean_transit_time,
                    ezm.zone
             FROM edge e
             LEFT JOIN edge_zone_map ezm ON e.edge_id = ezm.edge_id
@@ -230,12 +230,13 @@ class DrawdownEngine:
 
         rows = self.conn.execute(query, params).fetchall()
 
-        for edge_id, origin_id, dest_id, cost_var, distance, zone in rows:
+        for edge_id, origin_id, dest_id, cost_var, distance, mean_tt, zone in rows:
             route = {
                 'dist_node_id': origin_id,
                 'edge_id': edge_id,
                 'cost_variable': float(cost_var or 0),
                 'distance': float(distance) if distance is not None else float('inf'),
+                'mean_transit_time': float(mean_tt) if mean_tt is not None else None,
                 'zone': str(zone) if zone is not None else None,
             }
             if dest_id not in self._fulfillment_routes:
@@ -515,6 +516,7 @@ class DrawdownEngine:
                             quantity=fulfill_qty,
                             from_state='saleable', to_state='shipped',
                             demand_id=demand_id, cost=cost,
+                            duration=route.get('mean_transit_time'),
                             detail=json.dumps(detail))
 
             total_fulfilled += fulfill_qty
@@ -669,7 +671,8 @@ class DrawdownEngine:
                    edge_id: str = None, product_id: str = None,
                    quantity: float = None, from_state: str = None,
                    to_state: str = None, demand_id: str = None,
-                   cost: float = None, detail: str = None):
+                   cost: float = None, duration: float = None,
+                   detail: str = None):
         """Buffer an event for batch insertion."""
         if not self.write_event_log:
             return
@@ -678,7 +681,7 @@ class DrawdownEngine:
         self._event_buffer.append((
             self.scenario_id, self._event_counter, sim_date, sim_step,
             event_type, node_id, node_type, edge_id, product_id,
-            quantity, from_state, to_state, demand_id, cost, detail,
+            quantity, from_state, to_state, demand_id, cost, duration, detail,
         ))
 
     def _flush_events(self):
@@ -696,11 +699,17 @@ class DrawdownEngine:
                 'product_id': pl.Utf8, 'quantity': pl.Float64,
                 'from_state': pl.Utf8, 'to_state': pl.Utf8,
                 'demand_id': pl.Utf8, 'cost': pl.Float64,
-                'detail': pl.Utf8,
+                'duration': pl.Float64, 'detail': pl.Utf8,
             },
             orient='row',
         )
-        self.conn.execute("INSERT INTO event_log SELECT * FROM df")
+        self.conn.execute("""
+            INSERT INTO event_log (
+                scenario_id, event_id, sim_date, sim_step, event_type,
+                node_id, node_type, edge_id, product_id, quantity,
+                from_state, to_state, demand_id, cost, duration, detail
+            ) SELECT * FROM df
+        """)
         logger.info(f"Flushed {len(self._event_buffer)} events")
         self._event_buffer.clear()
 

@@ -1,37 +1,131 @@
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   getResultsSummary,
   getEvents as getEventsApi,
   getEventFilterOptions,
+  getFulfillmentDetail,
+  getNodeSummary,
+  getTransportationSummary,
+  getCostDetail,
+  getInventoryKpis,
+  fulfillmentCsvUrl,
   eventsExportUrl,
   snapshotsExportUrl,
   databaseExportUrl,
 } from '../api/client'
-import type { ResultsSummary, EventFilterOptions } from '../api/client'
+import type {
+  ResultsSummary,
+  EventFilterOptions,
+  FulfillmentDetail,
+  NodeSummary,
+  TransportationEdge,
+  CostDetail,
+  InventoryKpiData,
+} from '../api/client'
 import InventoryChart from '../components/InventoryChart'
+
+// ── Collapsible section context ──────────────────────────────────────
+
+const SectionContext = createContext<{
+  version: number
+  setAllExpanded: (expanded: boolean) => void
+  registerKey: (key: string) => void
+}>({ version: 0, setAllExpanded: () => {}, registerKey: () => {} })
+
+function useSectionProvider() {
+  const [version, setVersion] = useState(0)
+  const keysRef = useRef(new Set<string>())
+
+  const registerKey = useCallback((key: string) => { keysRef.current.add(key) }, [])
+
+  const setAllExpanded = useCallback((expanded: boolean) => {
+    for (const key of keysRef.current) {
+      localStorage.setItem(key, expanded ? '1' : '0')
+    }
+    setVersion(v => v + 1)
+  }, [])
+
+  return { version, setAllExpanded, registerKey }
+}
+
+/** Collapsible section with localStorage-persisted state. */
+function Section({ sectionKey, title, children }: {
+  sectionKey: string
+  title: string
+  children: React.ReactNode
+}) {
+  const storageKey = `scim_section_${sectionKey}`
+  const { version, registerKey } = useContext(SectionContext)
+  const [expanded, setExpanded] = useState(() => localStorage.getItem(storageKey) !== '0')
+
+  useEffect(() => { registerKey(storageKey) }, [storageKey, registerKey])
+
+  // Re-read from localStorage when version changes (show/collapse all)
+  useEffect(() => {
+    setExpanded(localStorage.getItem(storageKey) !== '0')
+  }, [version, storageKey])
+
+  const toggle = () => {
+    const next = !expanded
+    setExpanded(next)
+    localStorage.setItem(storageKey, next ? '1' : '0')
+  }
+
+  return (
+    <section className="kpi-section collapsible-section">
+      <h2 className="section-header" onClick={toggle} style={{ cursor: 'pointer', userSelect: 'none' }}>
+        <span className="section-chevron">{expanded ? '\u25BC' : '\u25B6'}</span>
+        {' '}{title}
+      </h2>
+      {expanded && <div className="section-body">{children}</div>}
+    </section>
+  )
+}
+
+function SectionControls() {
+  const { setAllExpanded } = useContext(SectionContext)
+  return (
+    <div className="section-controls">
+      <button type="button" className="link-btn" onClick={() => setAllExpanded(true)}>Show All Sections</button>
+      <span className="section-controls-sep">|</span>
+      <button type="button" className="link-btn" onClick={() => setAllExpanded(false)}>Collapse All Sections</button>
+    </div>
+  )
+}
+
+// ── Formatting helpers ───────────────────────────────────────────────
+
+function fmtCost(v: number): string {
+  return `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function fmtQty(v: number): string {
+  return v.toLocaleString(undefined, { maximumFractionDigits: 0 })
+}
+
+// ── Main page ────────────────────────────────────────────────────────
+
+type TabKey = 'overview' | 'fulfillment' | 'inventory' | 'nodes' | 'transportation' | 'costs' | 'events' | 'flows'
+const TABS: TabKey[] = ['overview', 'fulfillment', 'inventory', 'nodes', 'transportation', 'costs', 'events', 'flows']
 
 export default function ScenarioPage() {
   const { dbName, scenarioId } = useParams<{ dbName: string; scenarioId: string }>()
   const [data, setData] = useState<ResultsSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'overview' | 'events' | 'inventory' | 'network'>('overview')
+  const [activeTab, setActiveTab] = useState<TabKey>('overview')
   const flowDataUrl = dbName && scenarioId
     ? `/api/results/${encodeURIComponent(scenarioId)}/flow-data?db=${encodeURIComponent(dbName)}`
     : null
 
+  const sectionCtx = useSectionProvider()
+
   useEffect(() => {
     if (!dbName || !scenarioId) return
     getResultsSummary(dbName, scenarioId)
-      .then(d => {
-        setData(d)
-        setLoading(false)
-      })
-      .catch(err => {
-        setError(err.message)
-        setLoading(false)
-      })
+      .then(d => { setData(d); setLoading(false) })
+      .catch(err => { setError(err.message); setLoading(false) })
   }, [dbName, scenarioId])
 
   if (loading) return <p>Loading results...</p>
@@ -41,154 +135,172 @@ export default function ScenarioPage() {
   const { metadata, events, fulfillment, costs, inventory } = data
 
   return (
-    <div className="scenario-page">
-      <div className="scenario-header">
-        <Link to="/" className="back-link">&larr; Back</Link>
-        <h1>{String(metadata.scenario_id)}</h1>
-        <div className="scenario-meta">
-          <span className={`status-badge status-${metadata.status}`}>{String(metadata.status)}</span>
-          <span>{String(metadata.total_steps)} steps</span>
-          <span>{String(metadata.wall_clock_seconds)}s runtime</span>
+    <SectionContext.Provider value={sectionCtx}>
+      <div className="scenario-page">
+        <div className="scenario-header">
+          <Link to="/" className="back-link">&larr; Back</Link>
+          <h1>{String(metadata.scenario_id)}</h1>
+          <div className="scenario-meta">
+            <span className={`status-badge status-${metadata.status}`}>{String(metadata.status)}</span>
+            <span>{String(metadata.total_steps)} steps</span>
+            <span>{String(metadata.wall_clock_seconds)}s runtime</span>
+          </div>
         </div>
-      </div>
 
-      <div className="tab-bar">
-        {(['overview', 'inventory', 'events', 'network'] as const).map(tab => (
-          <button
-            key={tab}
-            className={`tab ${activeTab === tab ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab)}
-          >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-          </button>
-        ))}
-      </div>
+        <div className="tab-bar">
+          {TABS.map(tab => (
+            <button
+              key={tab}
+              className={`tab ${activeTab === tab ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
+        </div>
+        <SectionControls />
 
-      {activeTab === 'overview' && (
-        <div className="tab-content">
-          {/* Fulfillment KPIs */}
-          <section className="kpi-section">
-            <h2>Fulfillment</h2>
-            <div className="kpi-grid">
-              <KpiCard label="Fill Rate" value={`${fulfillment.fill_rate_pct}%`} />
-              <KpiCard label="Demand Units" value={fulfillment.demand_units.toLocaleString()} />
-              <KpiCard label="Fulfilled" value={fulfillment.fulfilled_units.toLocaleString()} />
-              <KpiCard label="Lost Sales" value={fulfillment.lost_sale_units.toLocaleString()} />
-              <KpiCard label="Backorders" value={fulfillment.backorder_units.toLocaleString()} />
-            </div>
-          </section>
+        {activeTab === 'overview' && (
+          <div className="tab-content">
+            <Section sectionKey="overview_fulfillment" title="Fulfillment">
+              <div className="kpi-grid">
+                <KpiCard label="Fill Rate" value={`${fulfillment.fill_rate_pct}%`} />
+                <KpiCard label="Demand Units" value={fulfillment.demand_units.toLocaleString()} />
+                <KpiCard label="Fulfilled" value={fulfillment.fulfilled_units.toLocaleString()} />
+                <KpiCard label="Lost Sales" value={fulfillment.lost_sale_units.toLocaleString()} />
+                <KpiCard label="Backorders" value={fulfillment.backorder_units.toLocaleString()} />
+              </div>
+            </Section>
 
-          {/* Cost Summary */}
-          <section className="kpi-section">
-            <h2>Costs</h2>
-            <div className="kpi-grid">
-              <KpiCard label="Total Cost" value={`$${costs.total_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} />
-            </div>
-            <table className="data-table compact">
-              <thead>
-                <tr><th>Cost Type</th><th>Amount</th></tr>
-              </thead>
-              <tbody>
-                {costs.by_event_type.map(c => (
-                  <tr key={c.event_type}>
-                    <td>{c.event_type}</td>
-                    <td>${c.cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
-
-          {/* Event Summary */}
-          <section className="kpi-section">
-            <h2>Event Summary</h2>
-            <table className="data-table compact">
-              <thead>
-                <tr><th>Event Type</th><th>Count</th><th>Qty</th><th>Cost</th></tr>
-              </thead>
-              <tbody>
-                {events.map(e => (
-                  <tr key={e.event_type}>
-                    <td>{e.event_type}</td>
-                    <td>{e.count.toLocaleString()}</td>
-                    <td>{e.total_qty != null ? e.total_qty.toLocaleString() : '-'}</td>
-                    <td>{e.total_cost != null ? `$${e.total_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
-
-          {/* Final Inventory */}
-          {inventory && (
-            <section className="kpi-section">
-              <h2>Final Inventory (as of {inventory.snapshot_date})</h2>
+            <Section sectionKey="overview_costs" title="Costs">
+              <div className="kpi-grid">
+                <KpiCard label="Total Cost" value={`$${costs.total_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} />
+              </div>
               <table className="data-table compact">
                 <thead>
-                  <tr><th>State</th><th>Qty</th><th>Nodes</th><th>Products</th></tr>
+                  <tr><th>Cost Type</th><th>Amount</th></tr>
                 </thead>
                 <tbody>
-                  {inventory.states.map(s => (
-                    <tr key={s.state}>
-                      <td>{s.state}</td>
-                      <td>{s.quantity.toLocaleString()}</td>
-                      <td>{s.nodes}</td>
-                      <td>{s.products}</td>
+                  {costs.by_event_type.map(c => (
+                    <tr key={c.event_type}>
+                      <td>{c.event_type}</td>
+                      <td>${c.cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </section>
-          )}
+            </Section>
 
-          {/* Export Links */}
-          <section className="kpi-section">
-            <h2>Export</h2>
-            <div className="export-links">
-              <a href={eventsExportUrl(dbName, scenarioId)} download>Download Events CSV</a>
-              <a href={snapshotsExportUrl(dbName, scenarioId)} download>Download Snapshots CSV</a>
-              <a href={databaseExportUrl(dbName)} download>Download Database</a>
-            </div>
-          </section>
-        </div>
-      )}
+            <Section sectionKey="overview_events" title="Event Summary">
+              <table className="data-table compact">
+                <thead>
+                  <tr><th>Event Type</th><th>Count</th><th>Qty</th><th>Cost</th></tr>
+                </thead>
+                <tbody>
+                  {events.map(e => (
+                    <tr key={e.event_type}>
+                      <td>{e.event_type}</td>
+                      <td>{e.count.toLocaleString()}</td>
+                      <td>{e.total_qty != null ? e.total_qty.toLocaleString() : '-'}</td>
+                      <td>{e.total_cost != null ? `$${e.total_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Section>
 
-      {activeTab === 'inventory' && (
-        <div className="tab-content">
-          <InventoryChart dbName={dbName} scenarioId={scenarioId} />
-        </div>
-      )}
-
-      {activeTab === 'events' && (
-        <div className="tab-content">
-          <EventLog dbName={dbName} scenarioId={scenarioId} />
-        </div>
-      )}
-
-      {activeTab === 'network' && (
-        <div className="tab-content">
-          <section className="kpi-section">
-            <h2>Network Flow Visualization</h2>
-            <p style={{ marginBottom: 12, color: 'var(--text-muted)', fontSize: 13 }}>
-              Animated map of fulfillment flows. Opens the flow visualizer with this scenario's data.
-            </p>
-            {flowDataUrl && (
-              <a
-                href={`http://localhost:5174?data=${encodeURIComponent(flowDataUrl)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-primary"
-                style={{ display: 'inline-block', textDecoration: 'none' }}
-              >
-                Open Flow Visualizer
-              </a>
+            {inventory && (
+              <Section sectionKey="overview_inventory" title={`Final Inventory (as of ${inventory.snapshot_date})`}>
+                <table className="data-table compact">
+                  <thead>
+                    <tr><th>State</th><th>Qty</th><th>Nodes</th><th>Products</th></tr>
+                  </thead>
+                  <tbody>
+                    {inventory.states.map(s => (
+                      <tr key={s.state}>
+                        <td>{s.state}</td>
+                        <td>{s.quantity.toLocaleString()}</td>
+                        <td>{s.nodes}</td>
+                        <td>{s.products}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Section>
             )}
-          </section>
-        </div>
-      )}
-    </div>
+
+            <Section sectionKey="overview_export" title="Export">
+              <div className="export-links">
+                <a href={eventsExportUrl(dbName, scenarioId)} download>Download Events CSV</a>
+                <a href={snapshotsExportUrl(dbName, scenarioId)} download>Download Snapshots CSV</a>
+                <a href={databaseExportUrl(dbName)} download>Download Database</a>
+              </div>
+            </Section>
+          </div>
+        )}
+
+        {activeTab === 'fulfillment' && (
+          <div className="tab-content">
+            <FulfillmentTab dbName={dbName} scenarioId={scenarioId} />
+          </div>
+        )}
+
+        {activeTab === 'inventory' && (
+          <div className="tab-content">
+            <InventoryTab dbName={dbName} scenarioId={scenarioId} />
+          </div>
+        )}
+
+        {activeTab === 'nodes' && (
+          <div className="tab-content">
+            <NodesTab dbName={dbName} scenarioId={scenarioId} />
+          </div>
+        )}
+
+        {activeTab === 'transportation' && (
+          <div className="tab-content">
+            <TransportationTab dbName={dbName} scenarioId={scenarioId} />
+          </div>
+        )}
+
+        {activeTab === 'costs' && (
+          <div className="tab-content">
+            <CostsTab dbName={dbName} scenarioId={scenarioId} />
+          </div>
+        )}
+
+        {activeTab === 'events' && (
+          <div className="tab-content">
+            <EventLog dbName={dbName} scenarioId={scenarioId} />
+          </div>
+        )}
+
+        {activeTab === 'flows' && (
+          <div className="tab-content">
+            <Section sectionKey="flows_viz" title="Network Flow Visualization">
+              <p style={{ marginBottom: 12, color: 'var(--text-muted)', fontSize: 13 }}>
+                Animated map of fulfillment flows. Opens the flow visualizer with this scenario&apos;s data.
+              </p>
+              {flowDataUrl && (
+                <a
+                  href={`http://localhost:5174?data=${encodeURIComponent(flowDataUrl)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-primary"
+                  style={{ display: 'inline-block', textDecoration: 'none' }}
+                >
+                  Open Flow Visualizer
+                </a>
+              )}
+            </Section>
+          </div>
+        )}
+      </div>
+    </SectionContext.Provider>
   )
 }
+
+// ── Shared components ────────────────────────────────────────────────
 
 function KpiCard({ label, value }: { label: string; value: string }) {
   return (
@@ -258,6 +370,460 @@ function MultiSelect({ label, options, selected, onChange }: {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Tab components ───────────────────────────────────────────────────
+
+function FulfillmentTab({ dbName, scenarioId }: { dbName: string; scenarioId: string }) {
+  const [data, setData] = useState<FulfillmentDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [productLimit, setProductLimit] = useState(50)
+
+  useEffect(() => {
+    getFulfillmentDetail(dbName, scenarioId)
+      .then(d => { setData(d); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [dbName, scenarioId])
+
+  if (loading) return <p>Loading...</p>
+  if (!data) return <div className="error">Failed to load fulfillment data</div>
+
+  const { stats, by_days, by_node, by_product } = data
+  const visibleProducts = by_product.slice(0, productLimit)
+
+  return (
+    <div>
+      <Section sectionKey="fulfillment_summary" title="Fulfillment Summary">
+        <div className="kpi-grid">
+          <KpiCard label="Fill Rate" value={`${stats.fill_rate_pct}%`} />
+          <KpiCard label="Demand Units" value={fmtQty(stats.demand_units)} />
+          <KpiCard label="Fulfilled" value={fmtQty(stats.fulfilled_units)} />
+          <KpiCard label="Value Shipped" value={fmtCost(stats.value_shipped ?? 0)} />
+          <KpiCard label="Lost Sales" value={fmtQty(stats.lost_sale_units)} />
+          <KpiCard label="Backorders" value={fmtQty(stats.backorder_units)} />
+        </div>
+      </Section>
+
+      <Section sectionKey="fulfillment_by_days" title="Fulfillment by Delivery Speed">
+        <div className="kpi-grid" style={{ marginBottom: 12 }}>
+          <KpiCard label="Median Days" value={String(by_days.median_days)} />
+          <KpiCard label="Average Days" value={String(by_days.avg_days)} />
+        </div>
+        <table className="data-table compact">
+          <thead>
+            <tr><th>Delivery Days</th><th>Qty</th><th>Value</th></tr>
+          </thead>
+          <tbody>
+            {by_days.buckets.map(b => (
+              <tr key={b.day}>
+                <td>{b.label}{b.day >= 5 ? '' : ' day'}{b.day === 1 ? '' : b.day < 5 ? 's' : ''}</td>
+                <td>{fmtQty(b.qty)}</td>
+                <td>{fmtCost(b.value)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+
+      <Section sectionKey="fulfillment_by_node" title="Fulfillment by Distribution Node">
+        <div className="export-links" style={{ marginBottom: 12 }}>
+          <a href={fulfillmentCsvUrl(dbName, scenarioId, 'by_node')} download>Download CSV</a>
+        </div>
+        <table className="data-table compact">
+          <thead>
+            <tr>
+              <th>Node</th>
+              <th>Shipments</th>
+              <th>Units Fulfilled</th>
+              <th>Value Shipped</th>
+              <th>Fulfillment Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {by_node.map(n => (
+              <tr key={n.dist_node_id}>
+                <td>{n.dist_node_id}</td>
+                <td>{fmtQty(n.fulfilled_events)}</td>
+                <td>{fmtQty(n.fulfilled_units)}</td>
+                <td>{fmtCost(n.value_shipped)}</td>
+                <td>{fmtCost(n.fulfillment_cost)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+
+      <Section sectionKey="fulfillment_by_product" title="Fulfillment by Product">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <label style={{ fontSize: 13 }}>
+            Show:{' '}
+            <select value={productLimit} onChange={e => setProductLimit(Number(e.target.value))}>
+              {[10, 50, 100, 200, 1000].map(n => (
+                <option key={n} value={n}>Top {n}</option>
+              ))}
+            </select>
+          </label>
+          <a href={fulfillmentCsvUrl(dbName, scenarioId, 'by_product')} download className="export-links">
+            Download All Products CSV
+          </a>
+        </div>
+        <table className="data-table compact">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Demand</th>
+              <th>Fulfilled</th>
+              <th>Value Shipped</th>
+              <th>Lost</th>
+              <th>Backorder</th>
+              <th>Fill Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleProducts.map(p => (
+              <tr key={p.product_id}>
+                <td>{p.product_id}</td>
+                <td>{fmtQty(p.demand_units)}</td>
+                <td>{fmtQty(p.fulfilled_units)}</td>
+                <td>{fmtCost(p.value_shipped)}</td>
+                <td>{fmtQty(p.lost_units)}</td>
+                <td>{fmtQty(p.backorder_units)}</td>
+                <td>{p.fill_rate_pct}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {by_product.length > productLimit && (
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+            Showing {productLimit} of {by_product.length} products
+          </p>
+        )}
+      </Section>
+    </div>
+  )
+}
+
+function InventoryTab({ dbName, scenarioId }: { dbName: string; scenarioId: string }) {
+  const [kpiData, setKpiData] = useState<InventoryKpiData | null>(null)
+  const [kpiLoading, setKpiLoading] = useState(true)
+
+  useEffect(() => {
+    getInventoryKpis(dbName, scenarioId)
+      .then(d => { setKpiData(d); setKpiLoading(false) })
+      .catch(() => setKpiLoading(false))
+  }, [dbName, scenarioId])
+
+  return (
+    <div>
+      {!kpiLoading && kpiData?.kpis && (
+        <Section sectionKey="inventory_kpis" title="Inventory KPIs">
+          <div className="kpi-grid">
+            <KpiCard label="Avg Inventory (units)" value={fmtQty(kpiData.kpis.avg_inventory_units)} />
+            <KpiCard label="Months of Supply" value={String(kpiData.kpis.months_of_supply)} />
+            <KpiCard label="Inventory Turns" value={String(kpiData.kpis.inventory_turns)} />
+          </div>
+        </Section>
+      )}
+
+      <Section sectionKey="inventory_chart" title="Inventory Over Time">
+        <InventoryChart dbName={dbName} scenarioId={scenarioId} />
+      </Section>
+
+      {!kpiLoading && kpiData && kpiData.by_node.length > 0 && (
+        <Section sectionKey="inventory_by_node" title="Average Inventory by Node">
+          <table className="data-table compact">
+            <thead>
+              <tr>
+                <th>Node</th>
+                <th>Avg Parts in Stock</th>
+                <th>Avg Units in Stock</th>
+                <th>Avg $ in Stock</th>
+              </tr>
+            </thead>
+            <tbody>
+              {kpiData.by_node.map(n => (
+                <tr key={n.dist_node_id}>
+                  <td>{n.dist_node_id}</td>
+                  <td>{fmtQty(n.avg_parts_in_stock)}</td>
+                  <td>{fmtQty(n.avg_units_in_stock)}</td>
+                  <td>{fmtCost(n.avg_value_in_stock)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Section>
+      )}
+    </div>
+  )
+}
+
+function NodesTab({ dbName, scenarioId }: { dbName: string; scenarioId: string }) {
+  const [data, setData] = useState<NodeSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getNodeSummary(dbName, scenarioId)
+      .then(d => { setData(d); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [dbName, scenarioId])
+
+  if (loading) return <p>Loading...</p>
+  if (!data) return <div className="error">Failed to load node data</div>
+
+  return (
+    <div>
+      <Section sectionKey="nodes_distribution" title={`Distribution Nodes (${data.distribution.length})`}>
+        <table className="data-table compact">
+          <thead>
+            <tr>
+              <th>Node</th>
+              <th>Name</th>
+              <th>Capacity</th>
+              <th>Fulfilled Units</th>
+              <th>Final Inventory</th>
+              <th>Fixed Cost</th>
+              <th>Fulfillment Cost</th>
+              <th>Overage Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.distribution.map(n => (
+              <tr key={n.node_id}>
+                <td>{n.node_id}</td>
+                <td>{n.name}</td>
+                <td>{n.storage_capacity != null ? `${fmtQty(n.storage_capacity)} ${n.storage_capacity_uom || ''}` : '-'}</td>
+                <td>{fmtQty(n.fulfilled_units)}</td>
+                <td>{fmtQty(n.final_inventory)}</td>
+                <td>{fmtCost(n.fixed_cost_total)}</td>
+                <td>{fmtCost(n.fulfillment_cost)}</td>
+                <td>{n.overage_cost > 0 ? fmtCost(n.overage_cost) : '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+
+      <Section sectionKey="nodes_supply" title={`Supply Nodes (${data.supply.length})`}>
+        <table className="data-table compact">
+          <thead>
+            <tr>
+              <th>Node</th>
+              <th>Name</th>
+              <th>Supplier</th>
+              <th>Lead Time (days)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.supply.map(n => (
+              <tr key={n.node_id}>
+                <td>{n.node_id}</td>
+                <td>{n.name}</td>
+                <td>{n.supplier_name}</td>
+                <td>{n.lead_time_days ?? '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+
+      <Section sectionKey="nodes_demand" title={`Demand Nodes (${data.demand.length})`}>
+        <table className="data-table compact">
+          <thead>
+            <tr>
+              <th>Node</th>
+              <th>Name</th>
+              <th>Demand Units</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.demand.map(n => (
+              <tr key={n.node_id}>
+                <td>{n.node_id}</td>
+                <td>{n.name}</td>
+                <td>{fmtQty(n.demand_units)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+    </div>
+  )
+}
+
+function TransportationTab({ dbName, scenarioId }: { dbName: string; scenarioId: string }) {
+  const [data, setData] = useState<TransportationEdge[] | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getTransportationSummary(dbName, scenarioId)
+      .then(d => { setData(d); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [dbName, scenarioId])
+
+  if (loading) return <p>Loading...</p>
+  if (!data) return <div className="error">Failed to load transportation data</div>
+
+  const byType = new Map<string, { shipments: number; qty: number; cost: number; edges: number }>()
+  for (const e of data) {
+    const key = e.transport_type || 'unknown'
+    const cur = byType.get(key) || { shipments: 0, qty: 0, cost: 0, edges: 0 }
+    cur.shipments += e.shipments
+    cur.qty += e.total_qty
+    cur.cost += e.total_cost
+    cur.edges += 1
+    byType.set(key, cur)
+  }
+
+  return (
+    <div>
+      <Section sectionKey="transport_by_type" title="Summary by Transport Type">
+        <table className="data-table compact">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Edges</th>
+              <th>Shipments</th>
+              <th>Total Qty</th>
+              <th>Total Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from(byType.entries()).map(([type, s]) => (
+              <tr key={type}>
+                <td>{type}</td>
+                <td>{fmtQty(s.edges)}</td>
+                <td>{fmtQty(s.shipments)}</td>
+                <td>{fmtQty(s.qty)}</td>
+                <td>{fmtCost(s.cost)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+
+      <Section sectionKey="transport_edges" title={`Edge Detail (${data.length} edges)`}>
+        <table className="data-table compact">
+          <thead>
+            <tr>
+              <th>Origin</th>
+              <th>Destination</th>
+              <th>Type</th>
+              <th>Transit Time</th>
+              <th>Distance</th>
+              <th>Shipments</th>
+              <th>Qty</th>
+              <th>Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map(e => (
+              <tr key={e.edge_id}>
+                <td>{e.origin_node_id}</td>
+                <td>{e.dest_node_id}</td>
+                <td>{e.transport_type}</td>
+                <td>{e.mean_transit_time != null ? `${e.mean_transit_time}d` : '-'}</td>
+                <td>{e.distance != null ? `${e.distance.toLocaleString()} ${e.distance_uom || ''}` : '-'}</td>
+                <td>{fmtQty(e.shipments)}</td>
+                <td>{fmtQty(e.total_qty)}</td>
+                <td>{e.total_cost > 0 ? fmtCost(e.total_cost) : '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+    </div>
+  )
+}
+
+function CostsTab({ dbName, scenarioId }: { dbName: string; scenarioId: string }) {
+  const [data, setData] = useState<CostDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getCostDetail(dbName, scenarioId)
+      .then(d => { setData(d); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [dbName, scenarioId])
+
+  if (loading) return <p>Loading...</p>
+  if (!data) return <div className="error">Failed to load cost data</div>
+
+  return (
+    <div>
+      <Section sectionKey="costs_summary" title="Cost Summary">
+        <div className="kpi-grid">
+          <KpiCard label="Total Cost" value={fmtCost(data.total_cost)} />
+        </div>
+      </Section>
+
+      <Section sectionKey="costs_by_type" title="Cost by Type">
+        <table className="data-table compact">
+          <thead>
+            <tr>
+              <th>Cost Type</th>
+              <th>Amount</th>
+              <th>% of Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.by_event_type.map(c => (
+              <tr key={c.event_type}>
+                <td>{c.event_type}</td>
+                <td>{fmtCost(c.cost)}</td>
+                <td>{data.total_cost > 0 ? `${(c.cost / data.total_cost * 100).toFixed(1)}%` : '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+
+      <Section sectionKey="costs_by_node" title="Cost by Node">
+        <table className="data-table compact">
+          <thead>
+            <tr>
+              <th>Node</th>
+              <th>Total</th>
+              <th>Fixed</th>
+              <th>Fulfillment</th>
+              <th>Overage</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.by_node.map(n => (
+              <tr key={n.node_id}>
+                <td>{n.node_id}</td>
+                <td>{fmtCost(n.total_cost)}</td>
+                <td>{fmtCost(n.fixed_cost)}</td>
+                <td>{fmtCost(n.fulfillment_cost)}</td>
+                <td>{n.overage_cost > 0 ? fmtCost(n.overage_cost) : '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+
+      <Section sectionKey="costs_by_product" title="Cost by Product">
+        <table className="data-table compact">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Total Cost</th>
+              <th>% of Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.by_product.map(p => (
+              <tr key={p.product_id}>
+                <td>{p.product_id}</td>
+                <td>{fmtCost(p.cost)}</td>
+                <td>{data.total_cost > 0 ? `${(p.cost / data.total_cost * 100).toFixed(1)}%` : '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
     </div>
   )
 }

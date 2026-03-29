@@ -59,11 +59,11 @@ export default function RunPage() {
         </div>
 
         <div className="form-group">
-          <label htmlFor="dbname">Database name (optional)</label>
+          <label htmlFor="dbname">Project name (optional — uses YAML 'database' field if not provided)</label>
           <input
             id="dbname"
             type="text"
-            placeholder="scenario_id.duckdb"
+            placeholder="e.g. drawdown_tests"
             value={dbName}
             onChange={e => setDbName(e.target.value)}
           />

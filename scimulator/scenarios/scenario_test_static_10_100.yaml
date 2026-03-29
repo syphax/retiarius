@@ -5,6 +5,7 @@
 # All ZIP3s
 
 scenario_id: "Drawdown Test 2"
+database: "drawdown_tests"
 name: "Sample Drawdown - Q1 2026"
 description: "Phase 1 test: drawdown with pre-loaded inventory and scheduled inbound shipments"
 currency_code: "USD"

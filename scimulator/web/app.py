@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import scenarios, results, network, data_io
+from .services.registry import init_registry
 
 
 @asynccontextmanager
@@ -17,7 +18,10 @@ async def lifespan(app: FastAPI):
     """Set up application state on startup."""
     data_dir = os.environ.get('SCIMULATOR_DATA_DIR', '.')
     app.state.data_dir = Path(data_dir).resolve()
+    app.state.registry = init_registry(app.state.data_dir)
     yield
+    # Clean up registry connection on shutdown
+    app.state.registry.close()
 
 
 app = FastAPI(

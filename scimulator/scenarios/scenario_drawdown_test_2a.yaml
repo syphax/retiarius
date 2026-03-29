@@ -3,6 +3,7 @@
 # Purpose: verify fulfillment logic under excess inventory (fill rate should be ~100%).
 
 scenario_id: "Drawdown Test 2a"
+database: "drawdown_tests"
 name: "Overstock Drawdown - Q1 2026"
 description: "Overstock test: each node has 12 months national demand per product. Fill rate should approach 100%."
 currency_code: "USD"

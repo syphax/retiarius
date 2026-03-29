@@ -18,10 +18,24 @@ def create_database(db_path: str) -> duckdb.DuckDBPyConnection:
 
 
 def open_database(db_path: str, read_only: bool = False) -> duckdb.DuckDBPyConnection:
-    """Open an existing DuckDB database."""
+    """Open an existing DuckDB database, applying any schema migrations."""
     if not Path(db_path).exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
-    return duckdb.connect(db_path, read_only=read_only)
+    conn = duckdb.connect(db_path, read_only=read_only)
+    if not read_only:
+        _migrate(conn)
+    return conn
+
+
+def _migrate(conn: duckdb.DuckDBPyConnection):
+    """Apply schema migrations to existing databases. Idempotent."""
+    # v0.3.1: add duration column to event_log
+    cols = {r[0] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'event_log'"
+    ).fetchall()}
+    if 'event_log' and 'duration' not in cols and cols:
+        conn.execute("ALTER TABLE event_log ADD COLUMN duration DECIMAL(10,2)")
 
 
 def _create_schema(conn: duckdb.DuckDBPyConnection):
@@ -434,6 +448,7 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             to_state TEXT,
             demand_id TEXT,
             cost DECIMAL(12,4),
+            duration DECIMAL(10,2),
             detail TEXT
         )
     """)

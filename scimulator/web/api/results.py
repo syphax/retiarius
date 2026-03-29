@@ -12,9 +12,18 @@ from ..services.query import (
     get_run_metadata,
     get_event_summary,
     get_fulfillment_stats,
+    get_fulfillment_by_node,
+    get_fulfillment_by_product,
+    get_fulfillment_by_days,
+    get_fulfillment_csv,
     get_cost_summary,
+    get_cost_detail,
     get_inventory_summary,
     get_inventory_timeseries,
+    get_inventory_kpis,
+    get_avg_inventory_by_node,
+    get_node_summary,
+    get_transportation_summary,
     get_event_log_page,
     get_event_filter_options,
 )
@@ -39,6 +48,99 @@ async def get_results_summary(scenario_id: str, db: str, request: Request):
             "costs": get_cost_summary(conn, scenario_id),
             "inventory": get_inventory_summary(conn, scenario_id),
         }
+    finally:
+        conn.close()
+
+
+@router.get("/results/{scenario_id}/fulfillment")
+async def get_fulfillment_detail(scenario_id: str, db: str, request: Request):
+    """Fulfillment breakdown by node, product, and delivery speed."""
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        stats = get_fulfillment_stats(conn, scenario_id)
+        by_node = get_fulfillment_by_node(conn, scenario_id)
+        by_product = get_fulfillment_by_product(conn, scenario_id)
+        by_days = get_fulfillment_by_days(conn, scenario_id)
+
+        # Add total value_shipped to stats
+        total_value = sum(n["value_shipped"] for n in by_node)
+        stats["value_shipped"] = total_value
+
+        return {
+            "stats": stats,
+            "by_days": by_days,
+            "by_node": by_node,
+            "by_product": by_product,
+        }
+    finally:
+        conn.close()
+
+
+@router.get("/results/{scenario_id}/fulfillment/csv")
+async def export_fulfillment_csv(
+    scenario_id: str,
+    db: str,
+    request: Request,
+    view: str = Query("by_node", pattern="^(by_node|by_product)$"),
+):
+    """Download fulfillment data as CSV."""
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        csv_data = get_fulfillment_csv(conn, scenario_id, view=view)
+        return PlainTextResponse(
+            csv_data,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=fulfillment_{view}_{scenario_id}.csv"},
+        )
+    finally:
+        conn.close()
+
+
+@router.get("/results/{scenario_id}/inventory/kpis")
+async def get_inventory_kpi_data(scenario_id: str, db: str, request: Request):
+    """Inventory KPIs: avg inventory, MOS, turns, and avg by node."""
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        return {
+            "kpis": get_inventory_kpis(conn, scenario_id),
+            "by_node": get_avg_inventory_by_node(conn, scenario_id),
+        }
+    finally:
+        conn.close()
+
+
+@router.get("/results/{scenario_id}/nodes")
+async def get_nodes_detail(scenario_id: str, db: str, request: Request):
+    """Network node summary with simulation activity stats."""
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        return get_node_summary(conn, scenario_id)
+    finally:
+        conn.close()
+
+
+@router.get("/results/{scenario_id}/transportation")
+async def get_transportation_detail(scenario_id: str, db: str, request: Request):
+    """Transportation edge utilization summary."""
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        return get_transportation_summary(conn, scenario_id)
+    finally:
+        conn.close()
+
+
+@router.get("/results/{scenario_id}/costs")
+async def get_costs_detail(scenario_id: str, db: str, request: Request):
+    """Detailed cost breakdown by type, node, and product."""
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        return get_cost_detail(conn, scenario_id)
     finally:
         conn.close()
 

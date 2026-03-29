@@ -55,7 +55,7 @@ def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
 
     # Build top-level config
     top_keys = {
-        'scenario_id', 'name', 'description', 'currency_code', 'time_resolution',
+        'scenario_id', 'name', 'database', 'description', 'currency_code', 'time_resolution',
         'start_date', 'end_date', 'warm_up_days', 'backorder_probability',
         'write_event_log', 'write_snapshots', 'snapshot_interval_days',
         'dataset_version_id', 'demand_csv', 'inbound_schedule_csv',

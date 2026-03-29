@@ -26,10 +26,18 @@ def cmd_run(args):
     logger = logging.getLogger('scimulator')
 
     yaml_path = args.scenario
-    db_path = args.db or str(Path(yaml_path).with_suffix('.duckdb'))
+    # DB path priority: --db flag > config.database > derive from YAML filename
+    db_path = args.db
 
     logger.info(f"Loading scenario from {yaml_path}")
     config = load_scenario_from_yaml(yaml_path)
+
+    if not db_path:
+        if config.database:
+            # Place DB next to the YAML file
+            db_path = str(Path(yaml_path).parent / f"{config.database}.duckdb")
+        else:
+            db_path = str(Path(yaml_path).with_suffix('.duckdb'))
 
     # Handle --fork: override the scenario_id
     scenario_id = config.scenario_id

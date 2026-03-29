@@ -55,6 +55,75 @@ export function listScenarios(dbName: string): Promise<ScenarioSummary[]> {
   return fetchJson(`${BASE}/scenarios?db=${encodeURIComponent(dbName)}`);
 }
 
+// Registry scenarios (with last_run_at and updated_at)
+export interface RegistryScenarioSummary {
+  scenario_id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  start_date: string | null;
+  end_date: string | null;
+  currency_code: string;
+  time_resolution: string;
+  backorder_probability: number | null;
+  status: string | null;
+  last_run_at: string | null;
+  run_wall_clock_seconds: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listRegistryScenarios(projectId: string): Promise<RegistryScenarioSummary[]> {
+  return fetchJson(`${BASE}/registry/projects/${encodeURIComponent(projectId)}/scenarios`);
+}
+
+// Projects
+export interface ProjectSummary {
+  project_id: string;
+  name: string;
+  description: string;
+  database: string;
+  scenario_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listProjects(): Promise<ProjectSummary[]> {
+  return fetchJson(`${BASE}/registry/projects`);
+}
+
+// Scenario actions
+export function rerunScenario(dbName: string, scenarioId: string): Promise<{ scenario_id: string; status: string }> {
+  return fetchJson(`${BASE}/scenarios/${encodeURIComponent(scenarioId)}/rerun?db=${encodeURIComponent(dbName)}`, {
+    method: 'POST',
+  });
+}
+
+export function duplicateScenario(
+  projectId: string,
+  scenarioId: string,
+  newScenarioId: string,
+): Promise<RegistryScenarioSummary> {
+  return fetchJson(
+    `${BASE}/registry/projects/${encodeURIComponent(projectId)}/scenarios/${encodeURIComponent(scenarioId)}/clone`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_scenario_id: newScenarioId }),
+    },
+  );
+}
+
+export function archiveScenario(
+  projectId: string,
+  scenarioId: string,
+): Promise<{ archived: string }> {
+  return fetchJson(
+    `${BASE}/registry/projects/${encodeURIComponent(projectId)}/scenarios/${encodeURIComponent(scenarioId)}/archive`,
+    { method: 'POST' },
+  );
+}
+
 export function getScenario(dbName: string, scenarioId: string): Promise<Record<string, unknown>> {
   return fetchJson(`${BASE}/scenarios/${encodeURIComponent(scenarioId)}?db=${encodeURIComponent(dbName)}`);
 }
@@ -95,6 +164,7 @@ export interface FulfillmentStats {
   lost_sale_units: number;
   backorder_events: number;
   backorder_units: number;
+  value_shipped?: number;
 }
 
 export interface CostSummary {
@@ -136,6 +206,157 @@ export function getInventoryTimeseries(
   if (nodeId) params.set('node_id', nodeId);
   if (productId) params.set('product_id', productId);
   return fetchJson(`${BASE}/results/${encodeURIComponent(scenarioId)}/inventory?${params}`);
+}
+
+// Fulfillment detail
+export interface FulfillmentByNode {
+  dist_node_id: string;
+  fulfilled_events: number;
+  fulfilled_units: number;
+  fulfillment_cost: number;
+  value_shipped: number;
+}
+
+export interface FulfillmentByProduct {
+  product_id: string;
+  demand_units: number;
+  fulfilled_units: number;
+  lost_units: number;
+  backorder_units: number;
+  value_shipped: number;
+  fill_rate_pct: number;
+}
+
+export interface FulfillmentDayBucket {
+  day: number;
+  label: string;
+  qty: number;
+  value: number;
+}
+
+export interface FulfillmentByDays {
+  buckets: FulfillmentDayBucket[];
+  avg_days: number;
+  median_days: number;
+}
+
+export interface FulfillmentDetail {
+  stats: FulfillmentStats;
+  by_days: FulfillmentByDays;
+  by_node: FulfillmentByNode[];
+  by_product: FulfillmentByProduct[];
+}
+
+export function getFulfillmentDetail(dbName: string, scenarioId: string): Promise<FulfillmentDetail> {
+  return fetchJson(`${BASE}/results/${encodeURIComponent(scenarioId)}/fulfillment?db=${encodeURIComponent(dbName)}`);
+}
+
+export function fulfillmentCsvUrl(dbName: string, scenarioId: string, view: 'by_node' | 'by_product'): string {
+  return `${BASE}/results/${encodeURIComponent(scenarioId)}/fulfillment/csv?db=${encodeURIComponent(dbName)}&view=${view}`;
+}
+
+// Inventory KPIs
+export interface InventoryKpis {
+  avg_inventory_units: number;
+  total_fulfilled_units: number;
+  months_of_supply: number;
+  inventory_turns: number;
+  num_months: number;
+}
+
+export interface AvgInventoryByNode {
+  dist_node_id: string;
+  avg_parts_in_stock: number;
+  avg_units_in_stock: number;
+  avg_value_in_stock: number;
+}
+
+export interface InventoryKpiData {
+  kpis: InventoryKpis | null;
+  by_node: AvgInventoryByNode[];
+}
+
+export function getInventoryKpis(dbName: string, scenarioId: string): Promise<InventoryKpiData> {
+  return fetchJson(`${BASE}/results/${encodeURIComponent(scenarioId)}/inventory/kpis?db=${encodeURIComponent(dbName)}`);
+}
+
+// Node summary
+export interface DistributionNodeSummary {
+  node_id: string;
+  name: string;
+  latitude: number | null;
+  longitude: number | null;
+  storage_capacity: number | null;
+  storage_capacity_uom: string | null;
+  fixed_cost_rate: number | null;
+  fixed_cost_basis: string | null;
+  variable_cost_rate: number | null;
+  variable_cost_basis: string | null;
+  fulfilled_units: number;
+  fulfillment_cost: number;
+  fixed_cost_total: number;
+  overage_cost: number;
+  final_inventory: number;
+}
+
+export interface SupplyNodeSummary {
+  node_id: string;
+  name: string;
+  latitude: number | null;
+  longitude: number | null;
+  supplier_id: string;
+  supplier_name: string;
+  lead_time_days: number | null;
+}
+
+export interface DemandNodeSummary {
+  node_id: string;
+  name: string;
+  latitude: number | null;
+  longitude: number | null;
+  demand_units: number;
+}
+
+export interface NodeSummary {
+  distribution: DistributionNodeSummary[];
+  supply: SupplyNodeSummary[];
+  demand: DemandNodeSummary[];
+}
+
+export function getNodeSummary(dbName: string, scenarioId: string): Promise<NodeSummary> {
+  return fetchJson(`${BASE}/results/${encodeURIComponent(scenarioId)}/nodes?db=${encodeURIComponent(dbName)}`);
+}
+
+// Transportation summary
+export interface TransportationEdge {
+  edge_id: string;
+  origin_node_id: string;
+  origin_node_type: string;
+  dest_node_id: string;
+  dest_node_type: string;
+  transport_type: string;
+  mean_transit_time: number | null;
+  distance: number | null;
+  distance_uom: string | null;
+  shipments: number;
+  total_qty: number;
+  total_cost: number;
+}
+
+export function getTransportationSummary(dbName: string, scenarioId: string): Promise<TransportationEdge[]> {
+  return fetchJson(`${BASE}/results/${encodeURIComponent(scenarioId)}/transportation?db=${encodeURIComponent(dbName)}`);
+}
+
+// Cost detail
+export interface CostDetail {
+  total_cost: number;
+  by_event_type: { event_type: string; cost: number }[];
+  by_node: { node_id: string; total_cost: number; fixed_cost: number; fulfillment_cost: number; overage_cost: number }[];
+  by_product: { product_id: string; cost: number }[];
+}
+
+export function getCostDetail(dbName: string, scenarioId: string): Promise<CostDetail> {
+  return fetchJson(`${BASE}/results/${encodeURIComponent(scenarioId)}/costs?db=${encodeURIComponent(dbName)}`);
 }
 
 // Events (paginated)
