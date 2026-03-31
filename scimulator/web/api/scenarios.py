@@ -21,9 +21,10 @@ from pydantic import BaseModel
 
 from ..services.db_manager import get_connection, list_databases
 from ..services import registry
+from ..services.word_pool import generate_scenario_id, next_clone_name
 from ...simulator.loader import load_scenario_from_yaml, load_scenario_into_db
 from ...simulator.engine import DrawdownEngine
-from ...simulator.db import open_database, scenario_has_results, clear_scenario_results
+from ...simulator.db import open_database, scenario_has_results, clear_scenario_results, clone_scenario_data
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -83,9 +84,13 @@ async def inspect_database(db_name: str, request: Request):
 
 @router.get("/scenarios")
 async def list_scenarios(db: str, request: Request):
-    """List all scenarios in a result database, with run status."""
+    """List all scenarios in a result database, with run status.
+
+    Also backfills any unregistered scenarios into the registry.
+    """
     db_path = _resolve_db(db, request)
     conn = get_connection(db_path, read_only=True)
+    reg = request.app.state.registry
     try:
         rows = conn.execute("""
             SELECT
@@ -98,6 +103,46 @@ async def list_scenarios(db: str, request: Request):
             LEFT JOIN run_metadata r ON s.scenario_id = r.scenario_id
             ORDER BY s.created_at DESC
         """).fetchall()
+
+        # Derive project_id from db filename (strip .duckdb)
+        project_id = db.replace('.duckdb', '')
+
+        # Ensure project exists in registry
+        if not registry.get_project(reg, project_id):
+            registry.save_project(reg, project_id, project_id, db)
+
+        # Backfill: register any scenarios not yet in the registry
+        for row in rows:
+            scenario_id = row[0]
+            if not registry.get_scenario(reg, scenario_id, project_id=project_id):
+                reg_fields = {}
+                if row[2]:
+                    reg_fields['description'] = row[2]
+                if row[3]:
+                    reg_fields['start_date'] = str(row[3])
+                if row[4]:
+                    reg_fields['end_date'] = str(row[4])
+                if row[5]:
+                    reg_fields['currency_code'] = row[5]
+                if row[6]:
+                    reg_fields['time_resolution'] = row[6]
+                if row[7] is not None:
+                    reg_fields['backorder_probability'] = float(row[7])
+                status = row[8] or 'completed'
+                registry.save_scenario(
+                    reg,
+                    scenario_id=scenario_id,
+                    name=row[1],
+                    project_id=project_id,
+                    status=status,
+                    **reg_fields,
+                )
+                if row[10] is not None:
+                    registry.update_run_status(
+                        reg, scenario_id, status,
+                        project_id=project_id,
+                        wall_clock_seconds=float(row[10]),
+                    )
 
         return [
             {
@@ -234,6 +279,47 @@ async def delete_project_endpoint(project_id: str, request: Request):
     return {"deleted": project_id}
 
 
+class ProjectClone(BaseModel):
+    new_name: str
+
+
+@router.post("/registry/projects/{project_id}/clone")
+async def clone_project_endpoint(
+    project_id: str, body: ProjectClone, request: Request,
+):
+    """Clone a project: copies the DB file and all registry entries."""
+    reg = request.app.state.registry
+    data_dir = request.app.state.data_dir
+
+    # Generate a project_id from the name (slugify)
+    new_project_id = body.new_name.lower().replace(' ', '_')
+    new_database = f"{new_project_id}.duckdb"
+
+    if registry.get_project(reg, new_project_id):
+        raise HTTPException(409, f"Project already exists: {new_project_id}")
+
+    result = registry.clone_project(
+        reg,
+        source_project_id=project_id,
+        new_project_id=new_project_id,
+        new_name=body.new_name,
+        new_database=new_database,
+        data_dir=data_dir,
+    )
+    if not result:
+        raise HTTPException(404, f"Project not found: {project_id}")
+    return result
+
+
+@router.post("/registry/projects/{project_id}/archive")
+async def archive_project_endpoint(project_id: str, request: Request):
+    """Archive a project (soft delete)."""
+    reg = request.app.state.registry
+    if not registry.archive_project(reg, project_id):
+        raise HTTPException(404, f"Project not found: {project_id}")
+    return {"archived": project_id}
+
+
 # ---------------------------------------------------------------------------
 # Registry CRUD — scenario configs
 # ---------------------------------------------------------------------------
@@ -283,7 +369,7 @@ async def update_registry_scenario(
     fields = {k: v for k, v in body.model_dump().items()
               if v is not None and k not in ('name', 'yaml_content')}
 
-    return registry.save_scenario(
+    result = registry.save_scenario(
         reg,
         scenario_id=scenario_id,
         name=body.name or existing['name'],
@@ -292,9 +378,31 @@ async def update_registry_scenario(
         **fields,
     )
 
+    # Write-through: sync name/description to the result DB
+    if body.name is not None or body.description is not None:
+        data_dir = request.app.state.data_dir
+        project = registry.get_project(reg, project_id)
+        if project:
+            db_path = data_dir / project['database']
+            if db_path.exists():
+                try:
+                    conn = get_connection(str(db_path))
+                    if body.name is not None:
+                        conn.execute("UPDATE scenario SET name = ? WHERE scenario_id = ?",
+                                     [body.name, scenario_id])
+                    if body.description is not None:
+                        conn.execute("UPDATE scenario SET description = ? WHERE scenario_id = ?",
+                                     [body.description, scenario_id])
+                    conn.close()
+                except Exception as e:
+                    logger.warning(f"Write-through to result DB failed: {e}")
+
+    return result
+
 
 class ScenarioClone(BaseModel):
-    new_scenario_id: str
+    new_scenario_id: Optional[str] = None
+    new_name: Optional[str] = None
     target_project_id: Optional[str] = None
 
 
@@ -305,17 +413,73 @@ async def clone_registry_scenario(
     body: ScenarioClone,
     request: Request,
 ):
-    """Clone a scenario, optionally into a different project. Full copy, no link."""
+    """Clone a scenario, optionally into a different project.
+
+    Auto-generates scenario ID (random 5-letter word) and name
+    ("<original> clone 01") if not provided.
+
+    Full independent copy. If the source has results in the result DB,
+    those are cloned too (so the copy is immediately viewable).
+    """
     reg = request.app.state.registry
+    data_dir = request.app.state.data_dir
+    target_proj = body.target_project_id or project_id
+
+    # Auto-generate scenario ID if not provided
+    if body.new_scenario_id:
+        new_id = body.new_scenario_id
+    else:
+        existing = registry.list_scenarios(reg, project_id=target_proj, include_archived=True)
+        existing_ids = {s['scenario_id'] for s in existing}
+        new_id = generate_scenario_id(existing_ids)
+
+    # Auto-generate clone name if not provided
+    if body.new_name:
+        new_name = body.new_name
+    else:
+        source = registry.get_scenario(reg, scenario_id, project_id=project_id)
+        if not source:
+            raise HTTPException(404, f"Scenario not found: {scenario_id}")
+        existing = registry.list_scenarios(reg, project_id=target_proj, include_archived=True)
+        existing_names = {s['name'] for s in existing}
+        new_name = next_clone_name(source['name'], existing_names)
+
+    # Clone in registry
     result = registry.clone_scenario(
         reg,
         source_scenario_id=scenario_id,
-        new_scenario_id=body.new_scenario_id,
+        new_scenario_id=new_id,
+        new_name=new_name,
         source_project_id=project_id,
         target_project_id=body.target_project_id,
     )
     if not result:
         raise HTTPException(404, f"Scenario not found: {scenario_id}")
+
+    # Clone result DB data if source has results
+    source_project = registry.get_project(reg, project_id)
+    if source_project:
+        db_path = data_dir / source_project['database']
+        if db_path.exists():
+            try:
+                conn = open_database(str(db_path))
+                try:
+                    if scenario_has_results(conn, scenario_id):
+                        clone_scenario_data(conn, scenario_id, new_id)
+                        # Update registry status to match source
+                        source_reg = registry.get_scenario(reg, scenario_id, project_id=project_id)
+                        if source_reg and source_reg.get('status') == 'completed':
+                            registry.update_run_status(
+                                reg, new_id, 'completed',
+                                project_id=target_proj,
+                                wall_clock_seconds=source_reg.get('run_wall_clock_seconds'),
+                            )
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.error(f"Failed to clone result DB data: {e}\n{traceback.format_exc()}")
+                raise HTTPException(500, f"Failed to clone scenario data: {str(e)}")
+
     return result
 
 
@@ -485,17 +649,29 @@ async def run_scenario(
 
 @router.post("/scenarios/{scenario_id}/rerun")
 async def rerun_scenario(scenario_id: str, db: str, request: Request):
-    """Re-run an existing scenario (clears old results)."""
+    """Re-run a scenario. Works for both existing results (clear + re-execute)
+    and draft scenarios (first run from scenario config in result DB).
+    """
     db_path = _resolve_db(db, request)
     reg = request.app.state.registry
+    project_id = db.replace('.duckdb', '')
 
     conn = open_database(db_path)
-    if not scenario_has_results(conn, scenario_id):
-        conn.close()
-        raise HTTPException(404, f"No results to replace for scenario: {scenario_id}")
-    clear_scenario_results(conn, scenario_id)
 
-    registry.update_run_status(reg, scenario_id, 'running')
+    # Check if scenario exists in result DB at all
+    has_scenario = conn.execute(
+        "SELECT COUNT(*) FROM scenario WHERE scenario_id = ?", [scenario_id]
+    ).fetchone()[0] > 0
+
+    if not has_scenario:
+        conn.close()
+        raise HTTPException(404, f"Scenario not found in database: {scenario_id}")
+
+    # Clear old results if any
+    if scenario_has_results(conn, scenario_id):
+        clear_scenario_results(conn, scenario_id)
+
+    registry.update_run_status(reg, scenario_id, 'running', project_id=project_id)
 
     try:
         engine = DrawdownEngine(conn, scenario_id)
@@ -511,12 +687,14 @@ async def rerun_scenario(scenario_id: str, db: str, request: Request):
 
         registry.update_run_status(
             reg, scenario_id, 'completed',
+            project_id=project_id,
             wall_clock_seconds=wall_clock,
         )
     except Exception as e:
         conn.close()
         logger.error(f"Re-run failed: {e}")
-        registry.update_run_status(reg, scenario_id, 'failed', error=str(e))
+        registry.update_run_status(reg, scenario_id, 'failed',
+                                   project_id=project_id, error=str(e))
         raise HTTPException(500, f"Simulation failed: {str(e)}")
 
     conn.close()

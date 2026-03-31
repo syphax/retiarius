@@ -402,6 +402,80 @@ select {
   border-color: var(--danger);
 }
 
+/* Inline editing */
+.inline-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+.inline-edit-input {
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--text-h);
+  padding: 4px 8px;
+  font-family: var(--sans);
+}
+.inline-edit-name {
+  font-size: 1.4em;
+  font-weight: 700;
+  width: 400px;
+}
+.inline-edit-desc {
+  font-size: 0.95em;
+  width: 500px;
+  min-height: 60px;
+  color: var(--text-muted);
+  resize: vertical;
+  font-family: var(--sans);
+  line-height: 1.5;
+}
+.inline-edit-btn {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 0.85em;
+}
+.inline-edit-btn:hover {
+  background: var(--bg-hover);
+}
+.inline-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0;
+}
+.scenario-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.scenario-title-row h1 {
+  margin: 0;
+}
+.scenario-description {
+  color: var(--text-muted);
+  font-size: 0.95em;
+  margin: 2px 0 4px;
+}
+.placeholder-text {
+  font-style: italic;
+  opacity: 0.5;
+}
+.scenario-id-label {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+.scenario-id-col {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .app-main { padding: 16px; }

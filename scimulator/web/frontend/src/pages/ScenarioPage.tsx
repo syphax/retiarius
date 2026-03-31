@@ -9,6 +9,8 @@ import {
   getTransportationSummary,
   getCostDetail,
   getInventoryKpis,
+  getRegistryScenario,
+  updateRegistryScenario,
   fulfillmentCsvUrl,
   eventsExportUrl,
   snapshotsExportUrl,
@@ -119,14 +121,58 @@ export default function ScenarioPage() {
     ? `/api/results/${encodeURIComponent(scenarioId)}/flow-data?db=${encodeURIComponent(dbName)}`
     : null
 
+  // Inline editing state
+  const [scenarioName, setScenarioName] = useState<string>('')
+  const [scenarioDesc, setScenarioDesc] = useState<string>('')
+  const [editing, setEditing] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editDesc, setEditDesc] = useState('')
+
+  const projectId = dbName?.replace(/\.duckdb$/, '') || ''
+
   const sectionCtx = useSectionProvider()
 
   useEffect(() => {
     if (!dbName || !scenarioId) return
-    getResultsSummary(dbName, scenarioId)
-      .then(d => { setData(d); setLoading(false) })
+    // Fetch results summary and scenario detail (for name/description)
+    Promise.all([
+      getResultsSummary(dbName, scenarioId),
+      getRegistryScenario(dbName.replace(/\.duckdb$/, ''), scenarioId),
+    ])
+      .then(([results, regScenario]) => {
+        setData(results)
+        setScenarioName(String(regScenario.name || scenarioId))
+        setScenarioDesc(String(regScenario.description || ''))
+        setLoading(false)
+      })
       .catch(err => { setError(err.message); setLoading(false) })
   }, [dbName, scenarioId])
+
+  function startEditing() {
+    setEditName(scenarioName)
+    setEditDesc(scenarioDesc)
+    setEditing(true)
+  }
+
+  async function saveEdits() {
+    const newName = editName.trim() || scenarioName
+    const newDesc = editDesc.trim()
+    const fields: { name?: string; description?: string } = {}
+    if (newName !== scenarioName) fields.name = newName
+    if (newDesc !== scenarioDesc) fields.description = newDesc
+    if (Object.keys(fields).length > 0) {
+      try {
+        await updateRegistryScenario(projectId, scenarioId!, fields)
+        if (fields.name) setScenarioName(fields.name)
+        if (fields.description !== undefined) setScenarioDesc(fields.description)
+      } catch { /* ignore — registry may not have this scenario */ }
+    }
+    setEditing(false)
+  }
+
+  function cancelEditing() {
+    setEditing(false)
+  }
 
   if (loading) return <p>Loading results...</p>
   if (error) return <div className="error">Error: {error}</div>
@@ -139,8 +185,45 @@ export default function ScenarioPage() {
       <div className="scenario-page">
         <div className="scenario-header">
           <Link to="/" className="back-link">&larr; Back</Link>
-          <h1>{String(metadata.scenario_id)}</h1>
+          {editing ? (
+            <>
+              <div className="inline-edit">
+                <input
+                  className="inline-edit-input inline-edit-name"
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveEdits(); if (e.key === 'Escape') cancelEditing() }}
+                  autoFocus
+                />
+              </div>
+              <div className="inline-edit">
+                <textarea
+                  className="inline-edit-input inline-edit-desc"
+                  value={editDesc}
+                  onChange={e => setEditDesc(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Escape') cancelEditing() }}
+                  placeholder="Add a description..."
+                  rows={3}
+                />
+              </div>
+              <div className="inline-edit-actions">
+                <button className="inline-edit-btn" onClick={saveEdits}>Save</button>
+                <button className="inline-edit-btn" onClick={cancelEditing}>Cancel</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="scenario-title-row">
+                <h1>{scenarioName}</h1>
+                <button className="icon-btn" title="Edit name and description" onClick={startEditing}>{'\u270E'}</button>
+              </div>
+              <p className="scenario-description">
+                {scenarioDesc || <span className="placeholder-text">No description</span>}
+              </p>
+            </>
+          )}
           <div className="scenario-meta">
+            <span className="scenario-id-label">{String(scenarioId)}</span>
             <span className={`status-badge status-${metadata.status}`}>{String(metadata.status)}</span>
             <span>{String(metadata.total_steps)} steps</span>
             <span>{String(metadata.wall_clock_seconds)}s runtime</span>

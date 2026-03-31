@@ -499,6 +499,42 @@ def scenario_has_results(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> b
     return row[0] > 0
 
 
+def clone_scenario_data(conn: duckdb.DuckDBPyConnection, source_id: str, new_id: str):
+    """Clone all scenario data (config + results) under a new scenario_id.
+
+    Copies: scenario, scenario_param, event_log, inventory_snapshot, run_metadata.
+    """
+    # Clone scenario config
+    cols = [r[0] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'scenario' ORDER BY ordinal_position"
+    ).fetchall()]
+    col_list = ', '.join(c for c in cols if c != 'scenario_id')
+    conn.execute(f"""
+        INSERT INTO scenario (scenario_id, {col_list})
+        SELECT ?, {col_list} FROM scenario WHERE scenario_id = ?
+    """, [new_id, source_id])
+
+    # Clone scenario params
+    conn.execute("""
+        INSERT INTO scenario_param (scenario_id, param_key, param_value)
+        SELECT ?, param_key, param_value FROM scenario_param WHERE scenario_id = ?
+    """, [new_id, source_id])
+
+    # Clone results (if any)
+    for table in ('event_log', 'inventory_snapshot', 'run_metadata'):
+        cols = [r[0] for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = ? ORDER BY ordinal_position",
+            [table]
+        ).fetchall()]
+        col_list = ', '.join(c for c in cols if c != 'scenario_id')
+        conn.execute(f"""
+            INSERT INTO {table} (scenario_id, {col_list})
+            SELECT ?, {col_list} FROM {table} WHERE scenario_id = ?
+        """, [new_id, source_id])
+
+
 def _seed_uom(conn: duckdb.DuckDBPyConnection):
     """Seed the UoM reference table with default units."""
     conn.execute("""

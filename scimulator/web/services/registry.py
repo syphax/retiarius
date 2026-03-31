@@ -16,6 +16,7 @@ Separate from result databases, which hold simulation output.
 """
 
 import logging
+import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -51,11 +52,20 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             name TEXT NOT NULL,
             description TEXT DEFAULT '',
             database TEXT NOT NULL,
+            status TEXT DEFAULT 'active',
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (project_id, org_id)
         )
     """)
+
+    # Migrate: add status column if missing
+    cols = {r[0] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'project'"
+    ).fetchall()}
+    if 'status' not in cols:
+        conn.execute("ALTER TABLE project ADD COLUMN status TEXT DEFAULT 'active'")
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS scenario_config (
@@ -141,23 +151,30 @@ def init_registry(data_dir: Path) -> duckdb.DuckDBPyConnection:
 def list_projects(
     conn: duckdb.DuckDBPyConnection,
     org_id: str = DEFAULT_ORG_ID,
+    include_archived: bool = False,
 ) -> List[Dict]:
-    """List all projects for an org."""
-    rows = conn.execute("""
+    """List all projects for an org. Excludes archived by default."""
+    query = """
         SELECT p.project_id, p.org_id, p.name, p.description, p.database,
-               p.created_at, p.updated_at,
+               p.status, p.created_at, p.updated_at,
                COUNT(s.scenario_id) as scenario_count
         FROM project p
         LEFT JOIN scenario_config s
             ON p.project_id = s.project_id AND p.org_id = s.org_id
+              AND (s.status IS NULL OR s.status != 'archived')
         WHERE p.org_id = ?
+    """
+    if not include_archived:
+        query += " AND (p.status IS NULL OR p.status != 'archived')"
+    query += """
         GROUP BY p.project_id, p.org_id, p.name, p.description, p.database,
-                 p.created_at, p.updated_at
+                 p.status, p.created_at, p.updated_at
         ORDER BY p.updated_at DESC
-    """, [org_id]).fetchall()
+    """
+    rows = conn.execute(query, [org_id]).fetchall()
 
     cols = ['project_id', 'org_id', 'name', 'description', 'database',
-            'created_at', 'updated_at', 'scenario_count']
+            'status', 'created_at', 'updated_at', 'scenario_count']
     return [_row_to_dict(cols, r) for r in rows]
 
 
@@ -223,6 +240,73 @@ def delete_project(
         WHERE project_id = ? AND org_id = ?
     """, [project_id, org_id])
     return True
+
+
+def archive_project(
+    conn: duckdb.DuckDBPyConnection,
+    project_id: str,
+    org_id: str = DEFAULT_ORG_ID,
+) -> bool:
+    """Archive a project (soft delete). Returns True if it existed."""
+    existing = get_project(conn, project_id, org_id)
+    if not existing:
+        return False
+    conn.execute("""
+        UPDATE project SET status = 'archived', updated_at = CURRENT_TIMESTAMP
+        WHERE project_id = ? AND org_id = ?
+    """, [project_id, org_id])
+    return True
+
+
+def clone_project(
+    conn: duckdb.DuckDBPyConnection,
+    source_project_id: str,
+    new_project_id: str,
+    new_name: str,
+    new_database: str,
+    data_dir: Path,
+    org_id: str = DEFAULT_ORG_ID,
+) -> Optional[Dict]:
+    """Clone a project: copy the DB file and all registry entries.
+
+    Returns the new project, or None if source not found.
+    """
+    source = get_project(conn, source_project_id, org_id)
+    if not source:
+        return None
+
+    # Copy the DuckDB file
+    src_db = data_dir / source['database']
+    dst_db = data_dir / new_database
+    if src_db.exists():
+        shutil.copy2(str(src_db), str(dst_db))
+
+    # Create project in registry
+    now = datetime.now()
+    conn.execute("""
+        INSERT INTO project (project_id, org_id, name, description, database,
+                             status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
+    """, [new_project_id, org_id, new_name, source.get('description', ''),
+          new_database, now, now])
+
+    # Clone all non-archived scenario configs, remapping project_id
+    scenarios = list_scenarios(conn, project_id=source_project_id, org_id=org_id,
+                               include_archived=False)
+    for s in scenarios:
+        fields = {k: v for k, v in s.items()
+                  if k not in ('scenario_id', 'project_id', 'org_id',
+                               'created_at', 'updated_at', 'name')}
+        save_scenario(
+            conn,
+            scenario_id=s['scenario_id'],
+            name=s['name'],
+            project_id=new_project_id,
+            org_id=org_id,
+            **fields,
+        )
+
+    return get_project(conn, new_project_id, org_id)
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +416,7 @@ def clone_scenario(
     conn: duckdb.DuckDBPyConnection,
     source_scenario_id: str,
     new_scenario_id: str,
+    new_name: Optional[str] = None,
     source_project_id: str = DEFAULT_PROJECT_ID,
     target_project_id: Optional[str] = None,
     org_id: str = DEFAULT_ORG_ID,
@@ -357,7 +442,7 @@ def clone_scenario(
     return save_scenario(
         conn,
         scenario_id=new_scenario_id,
-        name=f"{source['name']} (clone)",
+        name=new_name or f"{source['name']} (copy)",
         project_id=target_proj,
         org_id=org_id,
         status='draft',

@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import {
-  listDatabases, listScenarios, listProjects, listRegistryScenarios,
+  listScenarios, listRegistryScenarios,
   rerunScenario, duplicateScenario, archiveScenario,
 } from '../api/client'
-import type { DatabaseInfo, ScenarioSummary, ProjectSummary, RegistryScenarioSummary } from '../api/client'
+import type { ScenarioSummary, RegistryScenarioSummary } from '../api/client'
 
 function formatTimestamp(ts: string | null): string {
   if (!ts) return '-'
@@ -14,76 +14,38 @@ function formatTimestamp(ts: string | null): string {
 }
 
 export default function HomePage() {
-  const [databases, setDatabases] = useState<DatabaseInfo[]>([])
-  const [projects, setProjects] = useState<ProjectSummary[]>([])
-  const [selectedDb, setSelectedDb] = useState<string | null>(null)
-  const [selectedProject, setSelectedProject] = useState<string | null>(null)
+  const { dbName, projectId } = useParams<{ dbName: string; projectId: string }>()
   const [scenarios, setScenarios] = useState<ScenarioSummary[]>([])
   const [registryScenarios, setRegistryScenarios] = useState<RegistryScenarioSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
 
-  // Load databases and projects on mount
-  useEffect(() => {
-    Promise.all([listDatabases(), listProjects()])
-      .then(([dbs, projs]) => {
-        setDatabases(dbs)
-        setProjects(projs)
-        if (dbs.length > 0) {
-          setSelectedDb(dbs[0].name)
-          const match = projs.find(p => p.database === dbs[0].name)
-          setSelectedProject(match?.project_id || null)
-        }
-        setLoading(false)
-      })
-      .catch(err => {
-        setError(err.message)
-        setLoading(false)
-      })
-  }, [])
-
   const refreshScenarios = useCallback(() => {
-    if (!selectedDb) return
+    if (!dbName || !projectId) return
     setLoading(true)
 
-    const promises: Promise<void>[] = [
-      listScenarios(selectedDb).then(s => setScenarios(s))
-    ]
-
-    if (selectedProject) {
-      promises.push(
-        listRegistryScenarios(selectedProject)
-          .then(s => setRegistryScenarios(s))
-          .catch(() => setRegistryScenarios([]))
-      )
-    } else {
-      setRegistryScenarios([])
-    }
-
-    Promise.all(promises)
+    Promise.all([
+      listScenarios(dbName).then(s => setScenarios(s)),
+      listRegistryScenarios(projectId)
+        .then(s => setRegistryScenarios(s))
+        .catch(() => setRegistryScenarios([])),
+    ])
       .then(() => setLoading(false))
       .catch(err => {
         setError(err.message)
         setLoading(false)
       })
-  }, [selectedDb, selectedProject])
+  }, [dbName, projectId])
 
-  // Load scenarios when selection changes
   useEffect(() => { refreshScenarios() }, [refreshScenarios])
 
-  function handleDbChange(dbName: string) {
-    setSelectedDb(dbName)
-    const match = projects.find(p => p.database === dbName)
-    setSelectedProject(match?.project_id || null)
-  }
-
   async function handleRun(scenarioId: string) {
-    if (!selectedDb) return
+    if (!dbName) return
     setActionInProgress(scenarioId)
     setError(null)
     try {
-      await rerunScenario(selectedDb, scenarioId)
+      await rerunScenario(dbName, scenarioId)
       refreshScenarios()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -92,68 +54,73 @@ export default function HomePage() {
     }
   }
 
-  async function handleDuplicate(scenarioId: string, name: string) {
-    if (!selectedProject) return
-    const newId = prompt('New scenario ID:', `${scenarioId}-copy`)
-    if (!newId) return
+  async function handleDuplicate(scenarioId: string) {
+    if (!projectId) return
+    setActionInProgress(`dup-${scenarioId}`)
     setError(null)
     try {
-      await duplicateScenario(selectedProject, scenarioId, newId)
+      await duplicateScenario(projectId, scenarioId)
       refreshScenarios()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setActionInProgress(null)
     }
   }
 
   async function handleArchive(scenarioId: string, name: string) {
-    if (!selectedProject) return
+    if (!projectId) return
     if (!confirm(`Archive "${name}"? It will be hidden from this list.`)) return
     setError(null)
     try {
-      await archiveScenario(selectedProject, scenarioId)
+      await archiveScenario(projectId, scenarioId)
       refreshScenarios()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
   }
 
-  // Merge: use result DB scenarios as base, enrich with registry timestamps
-  const mergedScenarios = scenarios.map(s => {
-    const reg = registryScenarios.find(r => r.scenario_id === s.scenario_id)
-    return {
-      ...s,
-      last_run_at: reg?.last_run_at || s.run_completed_at,
-      updated_at: reg?.updated_at || null,
-    }
-  })
-
-  if (error) return <div className="error">Error: {error}</div>
+  // Merge: union of result DB and registry scenarios, excluding archived
+  const registryIds = new Set(registryScenarios.map(r => r.scenario_id))
+  const resultDbIds = new Set(scenarios.map(s => s.scenario_id))
+  const mergedScenarios = [
+    ...scenarios
+      .filter(s => registryIds.size === 0 || registryIds.has(s.scenario_id))
+      .map(s => {
+        const reg = registryScenarios.find(r => r.scenario_id === s.scenario_id)
+        return {
+          ...s,
+          last_run_at: reg?.last_run_at || s.run_completed_at,
+          updated_at: reg?.updated_at || null,
+        }
+      }),
+    ...registryScenarios
+      .filter(r => !resultDbIds.has(r.scenario_id))
+      .map(r => ({
+        scenario_id: r.scenario_id,
+        name: r.name,
+        description: r.description,
+        start_date: r.start_date || '',
+        end_date: r.end_date || '',
+        currency_code: r.currency_code,
+        time_resolution: r.time_resolution,
+        backorder_probability: r.backorder_probability,
+        status: r.status,
+        total_steps: null as number | null,
+        wall_clock_seconds: r.run_wall_clock_seconds,
+        run_started_at: null as string | null,
+        run_completed_at: null as string | null,
+        last_run_at: r.last_run_at,
+        updated_at: r.updated_at,
+      })),
+  ]
 
   return (
     <div className="home-page">
+      <Link to="/" className="back-link">&larr; Projects</Link>
       <h1>Scenarios</h1>
 
-      {databases.length > 1 && (
-        <div className="db-selector">
-          <label>Project: </label>
-          <select
-            value={selectedDb || ''}
-            onChange={e => handleDbChange(e.target.value)}
-          >
-            {databases.map(db => (
-              <option key={db.name} value={db.name}>
-                {db.name.replace(/\.duckdb$/, '')}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {databases.length === 0 && !loading && (
-        <p className="empty-state">
-          No projects found. <Link to="/run">Run a simulation</Link> to get started.
-        </p>
-      )}
+      {error && <div className="error">Error: {error}</div>}
 
       {loading ? (
         <p>Loading...</p>
@@ -161,6 +128,7 @@ export default function HomePage() {
         <table className="data-table">
           <thead>
             <tr>
+              <th>ID</th>
               <th>Scenario</th>
               <th>Period</th>
               <th>Status</th>
@@ -173,12 +141,15 @@ export default function HomePage() {
           <tbody>
             {mergedScenarios.map(s => (
               <tr key={s.scenario_id}>
-                <td>
-                  <Link to={`/scenario/${selectedDb}/${s.scenario_id}`}>
-                    <strong>{s.name}</strong>
+                <td className="scenario-id-col">
+                  <Link to={`/scenario/${dbName}/${s.scenario_id}`}>
+                    {s.scenario_id.toUpperCase()}
                   </Link>
-                  <br />
-                  <small>{s.scenario_id}</small>
+                </td>
+                <td>
+                  <Link to={`/scenario/${dbName}/${s.scenario_id}`}>
+                    {s.name}
+                  </Link>
                 </td>
                 <td>{s.start_date} to {s.end_date}</td>
                 <td>
@@ -201,7 +172,8 @@ export default function HomePage() {
                   <button
                     className="icon-btn"
                     title="Duplicate scenario"
-                    onClick={() => handleDuplicate(s.scenario_id, s.name)}
+                    disabled={actionInProgress === `dup-${s.scenario_id}`}
+                    onClick={() => handleDuplicate(s.scenario_id)}
                   >
                     {'\u2398'}
                   </button>
@@ -216,7 +188,7 @@ export default function HomePage() {
               </tr>
             ))}
             {mergedScenarios.length === 0 && (
-              <tr><td colSpan={7} className="empty-state">No scenarios in this project.</td></tr>
+              <tr><td colSpan={8} className="empty-state">No scenarios in this project.</td></tr>
             )}
           </tbody>
         </table>

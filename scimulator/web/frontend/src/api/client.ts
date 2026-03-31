@@ -77,12 +77,17 @@ export function listRegistryScenarios(projectId: string): Promise<RegistryScenar
   return fetchJson(`${BASE}/registry/projects/${encodeURIComponent(projectId)}/scenarios`);
 }
 
+export function getRegistryScenario(projectId: string, scenarioId: string): Promise<RegistryScenarioSummary> {
+  return fetchJson(`${BASE}/registry/projects/${encodeURIComponent(projectId)}/scenarios/${encodeURIComponent(scenarioId)}`);
+}
+
 // Projects
 export interface ProjectSummary {
   project_id: string;
   name: string;
   description: string;
   database: string;
+  status: string;
   scenario_count: number;
   created_at: string;
   updated_at: string;
@@ -90,6 +95,36 @@ export interface ProjectSummary {
 
 export function listProjects(): Promise<ProjectSummary[]> {
   return fetchJson(`${BASE}/registry/projects`);
+}
+
+export function updateProject(
+  projectId: string,
+  fields: { name?: string; description?: string },
+): Promise<ProjectSummary> {
+  return fetchJson(`${BASE}/registry/projects/${encodeURIComponent(projectId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  });
+}
+
+export function cloneProject(
+  projectId: string,
+  newName: string,
+): Promise<ProjectSummary> {
+  return fetchJson(`${BASE}/registry/projects/${encodeURIComponent(projectId)}/clone`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ new_name: newName }),
+  });
+}
+
+export function archiveProject(
+  projectId: string,
+): Promise<{ archived: string }> {
+  return fetchJson(`${BASE}/registry/projects/${encodeURIComponent(projectId)}/archive`, {
+    method: 'POST',
+  });
 }
 
 // Scenario actions
@@ -102,14 +137,28 @@ export function rerunScenario(dbName: string, scenarioId: string): Promise<{ sce
 export function duplicateScenario(
   projectId: string,
   scenarioId: string,
-  newScenarioId: string,
 ): Promise<RegistryScenarioSummary> {
   return fetchJson(
     `${BASE}/registry/projects/${encodeURIComponent(projectId)}/scenarios/${encodeURIComponent(scenarioId)}/clone`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ new_scenario_id: newScenarioId }),
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export function updateRegistryScenario(
+  projectId: string,
+  scenarioId: string,
+  fields: { name?: string; description?: string },
+): Promise<RegistryScenarioSummary> {
+  return fetchJson(
+    `${BASE}/registry/projects/${encodeURIComponent(projectId)}/scenarios/${encodeURIComponent(scenarioId)}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
     },
   );
 }

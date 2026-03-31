@@ -6,7 +6,7 @@ export default function Layout() {
       <header className="app-header">
         <Link to="/" className="app-logo">SCimulator</Link>
         <nav>
-          <Link to="/">Scenarios</Link>
+          <Link to="/">Projects</Link>
           <Link to="/run">Run Simulation</Link>
         </nav>
       </header>
