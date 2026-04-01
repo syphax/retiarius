@@ -58,6 +58,9 @@ class DrawdownEngine:
         self.scenario = dict(zip(cols, row))
 
         self.dataset_version_id = self.scenario['dataset_version_id']
+        self.demand_version_id = self.scenario.get('demand_version_id') or self.dataset_version_id
+        self.inbound_version_id = self.scenario.get('inbound_version_id') or self.dataset_version_id
+        self.inventory_version_id = self.scenario.get('inventory_version_id') or self.dataset_version_id
         self.start_date = self.scenario['start_date']
         self.end_date = self.scenario['end_date']
         self.backorder_prob = float(self.scenario['backorder_probability'])
@@ -155,7 +158,7 @@ class DrawdownEngine:
             FROM initial_inventory i
             WHERE i.dataset_version_id = ?
         """
-        params = [self.dataset_version_id]
+        params = [self.inventory_version_id]
 
         if self.distribution_node_set_id:
             query += """
@@ -321,7 +324,7 @@ class DrawdownEngine:
             FROM inbound_schedule
             WHERE dataset_version_id = ? AND arrival_date = ?
         """
-        params = [self.dataset_version_id, sim_date]
+        params = [self.inbound_version_id, sim_date]
 
         if self.supply_node_set_id:
             query += """
@@ -416,7 +419,7 @@ class DrawdownEngine:
             FROM demand
             WHERE dataset_version_id = ? AND demand_date = ?
         """
-        params = [self.dataset_version_id, sim_date]
+        params = [self.demand_version_id, sim_date]
 
         if self.demand_node_set_id:
             query += """

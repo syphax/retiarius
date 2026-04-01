@@ -58,7 +58,8 @@ def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
         'scenario_id', 'name', 'database', 'description', 'currency_code', 'time_resolution',
         'start_date', 'end_date', 'warm_up_days', 'backorder_probability',
         'write_event_log', 'write_snapshots', 'snapshot_interval_days',
-        'dataset_version_id', 'demand_csv', 'inbound_schedule_csv',
+        'dataset_version_id', 'demand_version_id', 'inbound_version_id',
+        'inventory_version_id', 'demand_csv', 'inbound_schedule_csv',
         'initial_inventory_csv', 'product_csv', 'customer_csv',
         'distribution_nodes_csv', 'edge_csvs',
         'params', 'notes',
@@ -116,6 +117,14 @@ def _load_dataset_version(conn, config: ScenarioConfig):
         INSERT OR IGNORE INTO dataset_version (dataset_version_id, name, created_by)
         VALUES (?, ?, 'loader')
     """, [config.dataset_version_id, f"Dataset for {config.name}"])
+    # Register per-table version overrides if they differ from the base
+    for ver_id in (config.demand_version_id, config.inbound_version_id,
+                   config.inventory_version_id):
+        if ver_id and ver_id != config.dataset_version_id:
+            conn.execute("""
+                INSERT OR IGNORE INTO dataset_version (dataset_version_id, name, created_by)
+                VALUES (?, ?, 'loader')
+            """, [ver_id, f"Dataset version {ver_id}"])
 
 
 def _load_suppliers(conn, config: ScenarioConfig):
@@ -471,8 +480,9 @@ def _load_demand(conn, config: ScenarioConfig):
         else:
             df['demand_id'] = [str(uuid.uuid4()) for _ in range(len(df))]
 
-    # Add dataset_version_id
-    df['dataset_version_id'] = config.dataset_version_id
+    # Add dataset_version_id (use per-table override if set)
+    demand_ver = config.demand_version_id or config.dataset_version_id
+    df['dataset_version_id'] = demand_ver
 
     # Ensure order_id exists
     if 'order_id' not in df.columns:
@@ -490,16 +500,17 @@ def _load_demand(conn, config: ScenarioConfig):
         SELECT * FROM insert_df
     """)
 
-    logger.info(f"Loaded {len(df)} demand events for dataset {config.dataset_version_id}")
+    logger.info(f"Loaded {len(df)} demand events for dataset {demand_ver}")
 
 
 def _load_inbound_schedule(conn, config: ScenarioConfig):
+    inbound_ver = config.inbound_version_id or config.dataset_version_id
     # Load from inline YAML entries
     for i in config.inbound_schedule:
         conn.execute("""
             INSERT OR REPLACE INTO inbound_schedule VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, [
-            config.dataset_version_id, i.inbound_id,
+            inbound_ver, i.inbound_id,
             i.supply_node_id, i.dest_node_id, i.product_id,
             i.quantity, i.ship_date, i.arrival_date,
         ])
@@ -507,7 +518,7 @@ def _load_inbound_schedule(conn, config: ScenarioConfig):
     # Load from CSV — bulk via DuckDB
     if config.inbound_schedule_csv:
         csv_path = _resolve_csv(config.inbound_schedule_csv)
-        dsv = config.dataset_version_id
+        dsv = inbound_ver
 
         conn.execute(f"""
             INSERT OR REPLACE INTO inbound_schedule
@@ -529,12 +540,13 @@ def _load_inbound_schedule(conn, config: ScenarioConfig):
 
 
 def _load_initial_inventory(conn, config: ScenarioConfig):
+    inv_ver = config.inventory_version_id or config.dataset_version_id
     # Load from inline YAML entries
     for inv in config.initial_inventory:
         conn.execute("""
             INSERT OR REPLACE INTO initial_inventory VALUES (?, ?, ?, ?, ?)
         """, [
-            config.dataset_version_id, inv.dist_node_id,
+            inv_ver, inv.dist_node_id,
             inv.product_id, inv.inventory_state, inv.quantity,
         ])
 
@@ -546,7 +558,7 @@ def _load_initial_inventory(conn, config: ScenarioConfig):
         if 'inventory_state' not in df.columns:
             df['inventory_state'] = 'saleable'
 
-        df['dataset_version_id'] = config.dataset_version_id
+        df['dataset_version_id'] = inv_ver
         insert_df = df[['dataset_version_id', 'dist_node_id', 'product_id',
                          'inventory_state', 'quantity']]
         conn.execute("INSERT OR REPLACE INTO initial_inventory SELECT * FROM insert_df")
@@ -581,11 +593,22 @@ def _build_generated_edges(conn, config: ScenarioConfig):
 
 def _load_scenario(conn, config: ScenarioConfig):
     conn.execute("""
-        INSERT OR REPLACE INTO scenario VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO scenario (
+            scenario_id, name, description,
+            dataset_version_id, demand_version_id, inbound_version_id,
+            inventory_version_id, currency_code,
+            time_resolution, start_date, end_date,
+            warm_up_days, backorder_probability,
+            write_event_log, write_snapshots, snapshot_interval_days,
+            product_set_id, supply_node_set_id,
+            distribution_node_set_id, demand_node_set_id, edge_set_id,
+            created_at, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, [
         config.scenario_id, config.name, config.description,
-        config.dataset_version_id, config.currency_code,
+        config.dataset_version_id, config.demand_version_id,
+        config.inbound_version_id, config.inventory_version_id,
+        config.currency_code,
         config.time_resolution, config.start_date, config.end_date,
         config.warm_up_days, config.backorder_probability,
         config.write_event_log, config.write_snapshots,

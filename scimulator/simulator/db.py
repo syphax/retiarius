@@ -37,6 +37,16 @@ def _migrate(conn: duckdb.DuckDBPyConnection):
     if 'event_log' and 'duration' not in cols and cols:
         conn.execute("ALTER TABLE event_log ADD COLUMN duration DECIMAL(10,2)")
 
+    # v0.3.2: per-table version IDs on scenario
+    scen_cols = {r[0] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'scenario'"
+    ).fetchall()}
+    if scen_cols:
+        for col in ('demand_version_id', 'inbound_version_id', 'inventory_version_id'):
+            if col not in scen_cols:
+                conn.execute(f"ALTER TABLE scenario ADD COLUMN {col} TEXT")
+
 
 def _create_schema(conn: duckdb.DuckDBPyConnection):
     """Create all tables in the SCimulator schema."""
@@ -61,6 +71,9 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             name TEXT NOT NULL,
             description TEXT,
             dataset_version_id TEXT,
+            demand_version_id TEXT,
+            inbound_version_id TEXT,
+            inventory_version_id TEXT,
             currency_code TEXT NOT NULL DEFAULT 'USD',
             time_resolution TEXT NOT NULL DEFAULT 'daily',
             start_date DATE NOT NULL,

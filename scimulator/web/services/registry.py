@@ -87,8 +87,11 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             write_snapshots BOOLEAN DEFAULT TRUE,
             snapshot_interval_days INTEGER DEFAULT 1,
 
-            -- Entity set references
+            -- Dataset version references
             dataset_version_id TEXT,
+            demand_version_id TEXT,
+            inbound_version_id TEXT,
+            inventory_version_id TEXT,
             product_set_id TEXT,
             supply_node_set_id TEXT,
             distribution_node_set_id TEXT,

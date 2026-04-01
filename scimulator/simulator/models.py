@@ -192,8 +192,11 @@ class ScenarioConfig:
     # Products
     products: List[ProductConfig] = field(default_factory=list)
 
-    # Dataset
+    # Dataset versions (per-table overrides; fall back to dataset_version_id)
     dataset_version_id: str = "v1"
+    demand_version_id: Optional[str] = None
+    inbound_version_id: Optional[str] = None
+    inventory_version_id: Optional[str] = None
     demand_csv: Optional[str] = None  # Path to demand CSV from demand engine
     inbound_schedule_csv: Optional[str] = None  # Path to inbound schedule CSV
     initial_inventory_csv: Optional[str] = None  # Path to initial inventory CSV
