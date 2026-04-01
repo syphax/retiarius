@@ -476,6 +476,15 @@ select {
   white-space: nowrap;
 }
 
+/* Histogram bars */
+.histogram-bar {
+  height: 14px;
+  background: var(--accent);
+  border-radius: 2px;
+  min-width: 1px;
+  opacity: 0.7;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .app-main { padding: 16px; }

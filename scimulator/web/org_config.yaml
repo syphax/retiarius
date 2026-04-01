@@ -1,0 +1,8 @@
+# Organization-level display settings
+# These configure terminology and defaults across the UI.
+
+terminology:
+  edge: "Lane"
+  edges: "Lanes"
+  node: "Node"
+  nodes: "Nodes"

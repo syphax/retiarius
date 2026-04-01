@@ -18,6 +18,7 @@ const COLORS = [
 
 export default function InventoryChart({ dbName, scenarioId }: { dbName: string; scenarioId: string }) {
   const [data, setData] = useState<InventoryTimeseries | null>(null)
+  const [metric, setMetric] = useState<'value' | 'units' | 'parts'>('value')
   const [groupBy, setGroupBy] = useState<'node' | 'product' | 'total'>('node')
   const [loading, setLoading] = useState(true)
   const [chartReady, setChartReady] = useState(false)
@@ -39,13 +40,13 @@ export default function InventoryChart({ dbName, scenarioId }: { dbName: string;
   // Fetch data
   useEffect(() => {
     setLoading(true)
-    getInventoryTimeseries(dbName, scenarioId, groupBy)
+    getInventoryTimeseries(dbName, scenarioId, groupBy, metric)
       .then(d => {
         setData(d)
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }, [dbName, scenarioId, groupBy])
+  }, [dbName, scenarioId, groupBy, metric])
 
   // Render chart
   useEffect(() => {
@@ -86,7 +87,7 @@ export default function InventoryChart({ dbName, scenarioId }: { dbName: string;
             ticks: { maxTicksLimit: 15 },
           },
           y: {
-            title: { display: true, text: 'Saleable Inventory (units)' },
+            title: { display: true, text: data.y_label || 'Saleable Inventory (units)' },
             beginAtZero: true,
           },
         },
@@ -106,7 +107,13 @@ export default function InventoryChart({ dbName, scenarioId }: { dbName: string;
   return (
     <div>
       <div className="chart-controls">
-        <label>Group by: </label>
+        <label>Metric: </label>
+        <select value={metric} onChange={e => setMetric(e.target.value as 'value' | 'units' | 'parts')}>
+          <option value="value">Inventory Value (at Cost)</option>
+          <option value="units">Units in Stock</option>
+          <option value="parts">Avg Parts in Stock</option>
+        </select>
+        <label style={{ marginLeft: 12 }}>Group by: </label>
         <select value={groupBy} onChange={e => setGroupBy(e.target.value as 'node' | 'product' | 'total')}>
           <option value="node">Node</option>
           <option value="product">Product</option>

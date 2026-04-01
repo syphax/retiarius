@@ -151,38 +151,57 @@ def get_inventory_timeseries(
     conn: duckdb.DuckDBPyConnection,
     scenario_id: str,
     group_by: str = "node",
+    metric: str = "units",
     node_id: Optional[str] = None,
     product_id: Optional[str] = None,
 ) -> Dict:
-    """Inventory quantities over time, grouped for charting."""
+    """Inventory over time, grouped for charting.
+
+    metric: 'units' (saleable qty), 'value' (qty * standard_cost),
+            'parts' (count distinct products with saleable > 0)
+    """
     # Build WHERE clause
-    conditions = ["scenario_id = ?", "inventory_state = 'saleable'"]
+    conditions = ["inv.scenario_id = ?", "inv.inventory_state = 'saleable'"]
     params: List[Any] = [scenario_id]
 
     if node_id:
-        conditions.append("dist_node_id = ?")
+        conditions.append("inv.dist_node_id = ?")
         params.append(node_id)
     if product_id:
-        conditions.append("product_id = ?")
+        conditions.append("inv.product_id = ?")
         params.append(product_id)
 
     where = " AND ".join(conditions)
 
     # Determine GROUP BY column
     group_col_map = {
-        "node": "dist_node_id",
-        "product": "product_id",
-        "state": "inventory_state",
+        "node": "inv.dist_node_id",
+        "product": "inv.product_id",
+        "state": "inv.inventory_state",
         "total": "'total'",
     }
-    group_col = group_col_map.get(group_by, "dist_node_id")
+    group_col = group_col_map.get(group_by, "inv.dist_node_id")
+
+    if metric == "value":
+        agg_expr = "SUM(inv.quantity * COALESCE(p.standard_cost, 0))"
+        join_clause = "LEFT JOIN product p ON inv.product_id = p.product_id"
+        y_label = "Inventory Value (at Cost)"
+    elif metric == "parts":
+        agg_expr = "COUNT(DISTINCT CASE WHEN inv.quantity > 0 THEN inv.product_id END)"
+        join_clause = ""
+        y_label = "Avg Parts in Stock"
+    else:  # units
+        agg_expr = "SUM(inv.quantity)"
+        join_clause = ""
+        y_label = "Saleable Inventory (units)"
 
     rows = conn.execute(f"""
-        SELECT sim_date, {group_col} as series, SUM(quantity) as qty
-        FROM inventory_snapshot
+        SELECT inv.sim_date, {group_col} as series, {agg_expr} as qty
+        FROM inventory_snapshot inv
+        {join_clause}
         WHERE {where}
-        GROUP BY sim_date, {group_col}
-        ORDER BY sim_date, {group_col}
+        GROUP BY inv.sim_date, {group_col}
+        ORDER BY inv.sim_date, {group_col}
     """, params).fetchall()
 
     # Pivot into {dates: [...], series: {name: [values]}}
@@ -202,11 +221,13 @@ def get_inventory_timeseries(
         "dates": dates,
         "series": series,
         "group_by": group_by,
+        "metric": metric,
+        "y_label": y_label,
     }
 
 
 def get_inventory_kpis(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> Optional[Dict]:
-    """Average inventory KPIs: months of supply, turns.
+    """Average inventory KPIs: months of supply, turns, value at cost.
 
     MOS = avg_inventory / (total_fulfilled / num_months)
     Turns = 12 / MOS
@@ -233,6 +254,18 @@ def get_inventory_kpis(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> Opt
         )
     """, [scenario_id]).fetchone()[0]
 
+    # Average daily inventory value at cost
+    avg_value = conn.execute("""
+        SELECT AVG(daily_value) FROM (
+            SELECT inv.sim_date,
+                   SUM(inv.quantity * COALESCE(p.standard_cost, 0)) as daily_value
+            FROM inventory_snapshot inv
+            LEFT JOIN product p ON inv.product_id = p.product_id
+            WHERE inv.scenario_id = ? AND inv.inventory_state = 'saleable'
+            GROUP BY inv.sim_date
+        )
+    """, [scenario_id]).fetchone()[0]
+
     # Total fulfilled units
     fulfilled = conn.execute("""
         SELECT SUM(quantity) FROM event_log
@@ -240,6 +273,7 @@ def get_inventory_kpis(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> Opt
     """, [scenario_id]).fetchone()[0]
 
     avg_inv = float(avg_inv) if avg_inv else 0
+    avg_value = float(avg_value) if avg_value else 0
     fulfilled = float(fulfilled) if fulfilled else 0
     monthly_sales = fulfilled / num_months if num_months > 0 else 0
 
@@ -248,6 +282,7 @@ def get_inventory_kpis(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> Opt
 
     return {
         "avg_inventory_units": round(avg_inv, 0),
+        "avg_inventory_value": round(avg_value, 2),
         "total_fulfilled_units": fulfilled,
         "months_of_supply": round(mos, 2),
         "inventory_turns": round(turns, 2),
@@ -284,6 +319,43 @@ def get_avg_inventory_by_node(conn: duckdb.DuckDBPyConnection, scenario_id: str)
             "avg_parts_in_stock": round(float(r[1]), 0) if r[1] else 0,
             "avg_units_in_stock": round(float(r[2]), 0) if r[2] else 0,
             "avg_value_in_stock": round(float(r[3]), 2) if r[3] else 0,
+        }
+        for r in rows
+    ]
+
+
+def get_avg_inventory_by_product(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> List[Dict]:
+    """Average inventory by product: units, value at cost, % of total, avg FCs with OH > 0."""
+    rows = conn.execute("""
+        SELECT s.product_id,
+               AVG(s.total_units) as avg_units,
+               AVG(s.total_value) as avg_value,
+               AVG(s.fcs_with_oh) as avg_fcs_with_oh
+        FROM (
+            SELECT inv.product_id, inv.sim_date,
+                   SUM(inv.quantity) as total_units,
+                   SUM(inv.quantity * COALESCE(p.standard_cost, 0)) as total_value,
+                   COUNT(DISTINCT CASE WHEN inv.quantity > 0 THEN inv.dist_node_id END) as fcs_with_oh
+            FROM inventory_snapshot inv
+            LEFT JOIN product p ON inv.product_id = p.product_id
+            WHERE inv.scenario_id = ?
+              AND inv.inventory_state = 'saleable'
+            GROUP BY inv.product_id, inv.sim_date
+        ) s
+        GROUP BY s.product_id
+        ORDER BY avg_units DESC
+    """, [scenario_id]).fetchall()
+
+    # Compute total for percentage
+    total_value = sum(float(r[2]) if r[2] else 0 for r in rows)
+
+    return [
+        {
+            "product_id": r[0],
+            "avg_units_oh": round(float(r[1]), 1) if r[1] else 0,
+            "avg_value": round(float(r[2]), 2) if r[2] else 0,
+            "pct_of_total": round(float(r[2]) / total_value * 100, 1) if total_value and r[2] else 0,
+            "avg_fcs_with_oh": round(float(r[3]), 1) if r[3] else 0,
         }
         for r in rows
     ]

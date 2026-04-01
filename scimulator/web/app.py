@@ -6,11 +6,21 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import yaml
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import scenarios, results, network, data_io
 from .services.registry import init_registry
+
+
+def _load_org_config() -> dict:
+    """Load organization-level config from org_config.yaml."""
+    config_path = Path(__file__).parent / "org_config.yaml"
+    if config_path.exists():
+        with open(config_path) as f:
+            return yaml.safe_load(f) or {}
+    return {}
 
 
 @asynccontextmanager
@@ -19,6 +29,7 @@ async def lifespan(app: FastAPI):
     data_dir = os.environ.get('SCIMULATOR_DATA_DIR', '.')
     app.state.data_dir = Path(data_dir).resolve()
     app.state.registry = init_registry(app.state.data_dir)
+    app.state.org_config = _load_org_config()
     yield
     # Clean up registry connection on shutdown
     app.state.registry.close()
@@ -45,3 +56,9 @@ app.include_router(scenarios.router, prefix="/api")
 app.include_router(results.router, prefix="/api")
 app.include_router(network.router, prefix="/api")
 app.include_router(data_io.router, prefix="/api")
+
+
+@app.get("/api/org-config")
+async def get_org_config():
+    """Return organization-level display settings."""
+    return app.state.org_config

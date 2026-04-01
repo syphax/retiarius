@@ -242,16 +242,19 @@ export interface InventoryTimeseries {
   dates: string[];
   series: Record<string, number[]>;
   group_by: string;
+  metric: string;
+  y_label: string;
 }
 
 export function getInventoryTimeseries(
   dbName: string,
   scenarioId: string,
   groupBy: string = 'node',
+  metric: string = 'units',
   nodeId?: string,
   productId?: string,
 ): Promise<InventoryTimeseries> {
-  const params = new URLSearchParams({ db: dbName, group_by: groupBy });
+  const params = new URLSearchParams({ db: dbName, group_by: groupBy, metric });
   if (nodeId) params.set('node_id', nodeId);
   if (productId) params.set('product_id', productId);
   return fetchJson(`${BASE}/results/${encodeURIComponent(scenarioId)}/inventory?${params}`);
@@ -307,6 +310,7 @@ export function fulfillmentCsvUrl(dbName: string, scenarioId: string, view: 'by_
 // Inventory KPIs
 export interface InventoryKpis {
   avg_inventory_units: number;
+  avg_inventory_value: number;
   total_fulfilled_units: number;
   months_of_supply: number;
   inventory_turns: number;
@@ -320,9 +324,18 @@ export interface AvgInventoryByNode {
   avg_value_in_stock: number;
 }
 
+export interface AvgInventoryByProduct {
+  product_id: string;
+  avg_units_oh: number;
+  avg_value: number;
+  pct_of_total: number;
+  avg_fcs_with_oh: number;
+}
+
 export interface InventoryKpiData {
   kpis: InventoryKpis | null;
   by_node: AvgInventoryByNode[];
+  by_product: AvgInventoryByProduct[];
 }
 
 export function getInventoryKpis(dbName: string, scenarioId: string): Promise<InventoryKpiData> {
@@ -489,4 +502,40 @@ export function snapshotsExportUrl(dbName: string, scenarioId: string): string {
 
 export function databaseExportUrl(dbName: string): string {
   return `${BASE}/export/database/${encodeURIComponent(dbName)}`;
+}
+
+// Org config
+export interface OrgTerminology {
+  edge: string;
+  edges: string;
+  node: string;
+  nodes: string;
+}
+
+export interface OrgConfig {
+  terminology: OrgTerminology;
+}
+
+const DEFAULT_ORG_CONFIG: OrgConfig = {
+  terminology: { edge: 'Edge', edges: 'Edges', node: 'Node', nodes: 'Nodes' },
+};
+
+let _orgConfigCache: OrgConfig | null = null;
+
+export async function getOrgConfig(): Promise<OrgConfig> {
+  if (_orgConfigCache) return _orgConfigCache;
+  try {
+    const raw = await fetchJson<Record<string, unknown>>(`${BASE}/org-config`);
+    _orgConfigCache = {
+      terminology: {
+        edge: String((raw.terminology as Record<string, string>)?.edge || 'Edge'),
+        edges: String((raw.terminology as Record<string, string>)?.edges || 'Edges'),
+        node: String((raw.terminology as Record<string, string>)?.node || 'Node'),
+        nodes: String((raw.terminology as Record<string, string>)?.nodes || 'Nodes'),
+      },
+    };
+  } catch {
+    _orgConfigCache = DEFAULT_ORG_CONFIG;
+  }
+  return _orgConfigCache;
 }

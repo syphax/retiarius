@@ -22,6 +22,7 @@ from ..services.query import (
     get_inventory_timeseries,
     get_inventory_kpis,
     get_avg_inventory_by_node,
+    get_avg_inventory_by_product,
     get_node_summary,
     get_transportation_summary,
     get_event_log_page,
@@ -100,13 +101,14 @@ async def export_fulfillment_csv(
 
 @router.get("/results/{scenario_id}/inventory/kpis")
 async def get_inventory_kpi_data(scenario_id: str, db: str, request: Request):
-    """Inventory KPIs: avg inventory, MOS, turns, and avg by node."""
+    """Inventory KPIs: avg inventory, MOS, turns, avg by node, and avg by product."""
     db_path = _resolve_db(db, request)
     conn = get_connection(db_path, read_only=True)
     try:
         return {
             "kpis": get_inventory_kpis(conn, scenario_id),
             "by_node": get_avg_inventory_by_node(conn, scenario_id),
+            "by_product": get_avg_inventory_by_product(conn, scenario_id),
         }
     finally:
         conn.close()
@@ -199,6 +201,7 @@ async def get_inventory_chart_data(
     db: str,
     request: Request,
     group_by: str = Query("node", pattern="^(node|product|state|total)$"),
+    metric: str = Query("units", pattern="^(units|value|parts)$"),
     node_id: Optional[str] = None,
     product_id: Optional[str] = None,
 ):
@@ -209,6 +212,7 @@ async def get_inventory_chart_data(
         return get_inventory_timeseries(
             conn, scenario_id,
             group_by=group_by,
+            metric=metric,
             node_id=node_id,
             product_id=product_id,
         )
