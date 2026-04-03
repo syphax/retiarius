@@ -26,6 +26,7 @@ import type {
   OrgConfig,
 } from '../api/client'
 import InventoryChart from '../components/InventoryChart'
+import ScenarioConfigForm from '../components/ScenarioConfigForm'
 
 // ── Collapsible section context ──────────────────────────────────────
 
@@ -108,8 +109,8 @@ function fmtQty(v: number): string {
 
 // ── Main page ────────────────────────────────────────────────────────
 
-type TabKey = 'overview' | 'fulfillment' | 'inventory' | 'nodes' | 'transportation' | 'costs' | 'events' | 'flows'
-const TABS: TabKey[] = ['overview', 'fulfillment', 'inventory', 'nodes', 'transportation', 'costs', 'events', 'flows']
+type TabKey = 'overview' | 'fulfillment' | 'inventory' | 'nodes' | 'transportation' | 'costs' | 'events' | 'flows' | 'configure'
+const TABS: TabKey[] = ['overview', 'fulfillment', 'inventory', 'nodes', 'transportation', 'costs', 'events', 'flows', 'configure']
 
 export default function ScenarioPage() {
   const { dbName, scenarioId } = useParams<{ dbName: string; scenarioId: string }>()
@@ -132,21 +133,26 @@ export default function ScenarioPage() {
 
   const projectId = dbName?.replace(/\.duckdb$/, '') || ''
   const [overviewKpis, setOverviewKpis] = useState<{ avg_inventory_value: number; months_of_supply: number } | null>(null)
+  const [registryStatus, setRegistryStatus] = useState<string | null>(null)
 
   const sectionCtx = useSectionProvider()
 
-  useEffect(() => {
+  const refreshData = useCallback(() => {
     if (!dbName || !scenarioId) return
     // Fetch results summary and scenario detail (for name/description)
+    // Results may not exist (draft/modified scenarios), so handle gracefully
     Promise.all([
-      getResultsSummary(dbName, scenarioId),
-      getRegistryScenario(dbName.replace(/\.duckdb$/, ''), scenarioId),
-      getInventoryKpis(dbName, scenarioId),
+      getResultsSummary(dbName, scenarioId).catch(() => null),
+      getRegistryScenario(dbName.replace(/\.duckdb$/, ''), scenarioId).catch(() => null),
+      getInventoryKpis(dbName, scenarioId).catch(() => null),
     ])
       .then(([results, regScenario, invKpiData]) => {
         setData(results)
-        setScenarioName(String(regScenario.name || scenarioId))
-        setScenarioDesc(String(regScenario.description || ''))
+        if (regScenario) {
+          setScenarioName(String(regScenario.name || scenarioId))
+          setScenarioDesc(String(regScenario.description || ''))
+          setRegistryStatus(regScenario.status)
+        }
         if (invKpiData?.kpis) {
           setOverviewKpis({
             avg_inventory_value: invKpiData.kpis.avg_inventory_value,
@@ -157,6 +163,8 @@ export default function ScenarioPage() {
       })
       .catch(err => { setError(err.message); setLoading(false) })
   }, [dbName, scenarioId])
+
+  useEffect(() => { refreshData() }, [refreshData])
 
   function startEditing() {
     setEditName(scenarioName)
@@ -185,10 +193,15 @@ export default function ScenarioPage() {
   }
 
   if (loading) return <p>Loading results...</p>
-  if (error) return <div className="error">Error: {error}</div>
-  if (!data || !dbName || !scenarioId) return <div className="error">No data</div>
+  if (error && !data && activeTab !== 'configure') return <div className="error">Error: {error}</div>
+  if (!dbName || !scenarioId) return <div className="error">No data</div>
 
-  const { metadata, events, fulfillment, costs } = data
+  const isModified = registryStatus === 'modified'
+  const hasResults = !!data
+  const metadata = data?.metadata
+  const events = data?.events
+  const fulfillment = data?.fulfillment
+  const costs = data?.costs
 
   return (
     <SectionContext.Provider value={sectionCtx}>
@@ -234,9 +247,15 @@ export default function ScenarioPage() {
             </>
           )}
           <div className="scenario-meta">
-            <span className={`status-badge status-${metadata.status}`}>{String(metadata.status)}</span>
-            <span>{String(metadata.total_steps)} steps</span>
-            <span>{String(metadata.wall_clock_seconds)}s runtime</span>
+            {metadata ? (
+              <>
+                <span className={`status-badge status-${metadata.status}`}>{String(metadata.status)}</span>
+                <span>{String(metadata.total_steps)} steps</span>
+                <span>{String(metadata.wall_clock_seconds)}s runtime</span>
+              </>
+            ) : (
+              <span className={`status-badge status-${registryStatus || 'none'}`}>{registryStatus || 'not run'}</span>
+            )}
           </div>
         </div>
 
@@ -251,9 +270,32 @@ export default function ScenarioPage() {
             </button>
           ))}
         </div>
-        <SectionControls />
+        {activeTab !== 'configure' && <SectionControls />}
 
-        {activeTab === 'overview' && (
+        {isModified && activeTab !== 'configure' && (
+          <div className="config-banner">
+            These results are from a previous configuration. Re-run to update.
+          </div>
+        )}
+
+        {activeTab === 'configure' && (
+          <div className="tab-content">
+            <ScenarioConfigForm
+              dbName={dbName}
+              scenarioId={scenarioId}
+              projectId={projectId}
+              onStatusChange={refreshData}
+            />
+          </div>
+        )}
+
+        {activeTab !== 'configure' && !hasResults && (
+          <div className="tab-content">
+            <p className="empty-state">No results yet. Run this scenario or switch to the Configure tab.</p>
+          </div>
+        )}
+
+        {activeTab === 'overview' && hasResults && fulfillment && costs && events && (
           <div className="tab-content">
             <Section sectionKey="overview_fulfillment" title="Fulfillment">
               <div className="kpi-grid">

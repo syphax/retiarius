@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   listScenarios, listRegistryScenarios,
   rerunScenario, duplicateScenario, archiveScenario,
@@ -14,6 +14,7 @@ function formatTimestamp(ts: string | null): string {
 }
 
 export default function HomePage() {
+  const navigate = useNavigate()
   const { dbName, projectId } = useParams<{ dbName: string; projectId: string }>()
   const [scenarios, setScenarios] = useState<ScenarioSummary[]>([])
   const [registryScenarios, setRegistryScenarios] = useState<RegistryScenarioSummary[]>([])
@@ -161,6 +162,13 @@ export default function HomePage() {
                 <td>{formatTimestamp(s.updated_at)}</td>
                 <td>{s.wall_clock_seconds != null ? `${s.wall_clock_seconds}s` : '-'}</td>
                 <td className="row-actions">
+                  <button
+                    className="icon-btn"
+                    title="Configure scenario"
+                    onClick={() => navigate(`/scenario/${dbName}/${encodeURIComponent(s.scenario_id)}?tab=configure`)}
+                  >
+                    {'\u2699'}
+                  </button>
                   <button
                     className="icon-btn"
                     title="Run scenario"

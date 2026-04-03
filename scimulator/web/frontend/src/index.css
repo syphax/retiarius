@@ -485,6 +485,211 @@ select {
   opacity: 0.7;
 }
 
+/* Config form */
+.config-form {
+  position: relative;
+}
+
+.config-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.config-actions-sep {
+  flex: 1;
+}
+.config-btn {
+  padding: 8px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+.config-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-h);
+  text-decoration: none;
+}
+.config-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.config-section {
+  margin-bottom: 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.config-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+.config-section-body {
+  padding: 0 16px 16px;
+}
+.config-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.config-section-toggle input[type="checkbox"] {
+  margin: 0;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.config-field label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.config-field input,
+.config-field select,
+.config-field textarea {
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--sans);
+}
+.config-field input:disabled,
+.config-field select:disabled,
+.config-field textarea:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.config-field textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+.config-field input:focus,
+.config-field select:focus,
+.config-field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Modified field highlighting */
+.config-field-modified input,
+.config-field-modified select,
+.config-field-modified textarea {
+  border-color: var(--warning);
+  background: rgba(242, 142, 43, 0.05);
+}
+.config-field-modified label {
+  color: var(--warning);
+}
+
+/* Validation error */
+.config-field-error input,
+.config-field-error select,
+.config-field-error textarea {
+  border-color: var(--danger);
+  background: rgba(225, 87, 89, 0.05);
+}
+.config-field-msg {
+  font-size: 11px;
+  color: var(--danger);
+}
+
+/* Checkbox fields */
+.config-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+.config-checkbox-label input[type="checkbox"] {
+  margin: 0;
+}
+
+/* Toast */
+.config-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  z-index: 200;
+  max-width: 600px;
+}
+.config-toast-undo {
+  background: none;
+  border: none;
+  color: var(--accent-light);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0;
+  white-space: nowrap;
+}
+.config-toast-undo:hover {
+  text-decoration: underline;
+}
+.config-toast-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 0 0 4px;
+}
+
+/* Modified results banner */
+.config-banner {
+  padding: 10px 16px;
+  background: rgba(242, 142, 43, 0.1);
+  border: 1px solid rgba(242, 142, 43, 0.3);
+  border-radius: var(--radius);
+  color: var(--warning);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+/* Modified status badge */
+.status-modified { background: rgba(242, 142, 43, 0.15); color: var(--warning); }
+.status-draft { background: rgba(122, 127, 138, 0.15); color: var(--text-muted); }
+
 /* Responsive */
 @media (max-width: 768px) {
   .app-main { padding: 16px; }

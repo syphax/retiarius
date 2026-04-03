@@ -504,6 +504,52 @@ export function databaseExportUrl(dbName: string): string {
   return `${BASE}/export/database/${encodeURIComponent(dbName)}`;
 }
 
+// Scenario config editing
+
+export interface DatasetVersionInfo {
+  dataset_version_id: string;
+  name: string;
+  description: string | null;
+}
+
+export interface ScenarioConfigResponse {
+  scenario: Record<string, unknown>;
+  dataset_versions: DatasetVersionInfo[];
+}
+
+export function getScenarioConfig(dbName: string, scenarioId: string): Promise<ScenarioConfigResponse> {
+  return fetchJson(`${BASE}/scenarios/${encodeURIComponent(scenarioId)}/config?db=${encodeURIComponent(dbName)}`);
+}
+
+export function updateScenarioConfig(
+  dbName: string,
+  scenarioId: string,
+  fields: Record<string, unknown>,
+): Promise<{ scenario_id: string; status: string; updated_fields: string[] }> {
+  return fetchJson(
+    `${BASE}/scenarios/${encodeURIComponent(scenarioId)}/config?db=${encodeURIComponent(dbName)}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
+    },
+  );
+}
+
+export function saveScenarioAs(
+  dbName: string,
+  scenarioId: string,
+): Promise<{ scenario_id: string; name: string }> {
+  return fetchJson(
+    `${BASE}/scenarios/${encodeURIComponent(scenarioId)}/save-as?db=${encodeURIComponent(dbName)}`,
+    { method: 'POST' },
+  );
+}
+
+export function exportScenarioYamlUrl(dbName: string, scenarioId: string): string {
+  return `${BASE}/scenarios/${encodeURIComponent(scenarioId)}/export-yaml?db=${encodeURIComponent(dbName)}`;
+}
+
 // Org config
 export interface OrgTerminology {
   edge: string;

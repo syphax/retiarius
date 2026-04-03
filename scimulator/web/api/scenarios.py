@@ -704,6 +704,231 @@ async def rerun_scenario(scenario_id: str, db: str, request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Scenario config editing (result DB)
+# ---------------------------------------------------------------------------
+
+# Fields in the scenario table that can be edited via the config form
+EDITABLE_SCENARIO_FIELDS = {
+    'name', 'description', 'currency_code', 'time_resolution',
+    'start_date', 'end_date', 'warm_up_days', 'backorder_probability',
+    'write_event_log', 'write_snapshots', 'snapshot_interval_days',
+    'dataset_version_id', 'demand_version_id', 'inbound_version_id',
+    'inventory_version_id',
+    'product_set_id', 'supply_node_set_id', 'distribution_node_set_id',
+    'demand_node_set_id', 'edge_set_id',
+    'fulfillment_logic',
+    'reorder_logic', 'reorder_scope', 'reorder_allocation',
+    'forecast_method', 'forecast_bias', 'forecast_error', 'forecast_distribution',
+    'order_frequency_days', 'safety_stock_days', 'mrq_days',
+    'consolidation_mode', 'min_cube_threshold',
+    'notes',
+}
+
+
+@router.put("/scenarios/{scenario_id}/config")
+async def update_scenario_config(
+    scenario_id: str,
+    db: str,
+    request: Request,
+    body: dict = Body(...),
+):
+    """Update scenario config fields in the result DB.
+
+    Writes only to the result DB scenario table (the engine's source of truth).
+    Also syncs name/description to the registry and sets status to 'modified'.
+    """
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path)
+    try:
+        # Verify scenario exists
+        exists = conn.execute(
+            "SELECT COUNT(*) FROM scenario WHERE scenario_id = ?", [scenario_id]
+        ).fetchone()[0]
+        if not exists:
+            raise HTTPException(404, f"Scenario not found: {scenario_id}")
+
+        # Filter to only editable fields that are present in the body
+        updates = {k: v for k, v in body.items() if k in EDITABLE_SCENARIO_FIELDS}
+        if not updates:
+            raise HTTPException(400, "No valid fields to update")
+
+        # Build UPDATE statement
+        set_clauses = [f"{k} = ?" for k in updates]
+        values = list(updates.values())
+        values.append(scenario_id)
+
+        conn.execute(
+            f"UPDATE scenario SET {', '.join(set_clauses)} WHERE scenario_id = ?",
+            values,
+        )
+    finally:
+        conn.close()
+
+    # Sync to registry: set status to 'modified', update name/description
+    reg = request.app.state.registry
+    project_id = db.replace('.duckdb', '')
+    reg_existing = registry.get_scenario(reg, scenario_id, project_id=project_id)
+    if reg_existing:
+        reg_fields = {}
+        for attr in ('description', 'currency_code', 'time_resolution',
+                     'start_date', 'end_date', 'backorder_probability'):
+            if attr in updates:
+                reg_fields[attr] = updates[attr]
+        registry.save_scenario(
+            reg,
+            scenario_id=scenario_id,
+            name=updates.get('name', reg_existing['name']),
+            project_id=project_id,
+            status='modified',
+            **reg_fields,
+        )
+
+    return {"scenario_id": scenario_id, "status": "modified", "updated_fields": list(updates.keys())}
+
+
+@router.get("/scenarios/{scenario_id}/config")
+async def get_scenario_config(scenario_id: str, db: str, request: Request):
+    """Get full scenario config from result DB for editing.
+
+    Returns the scenario row plus available dataset versions.
+    """
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        row = conn.execute(
+            "SELECT * FROM scenario WHERE scenario_id = ?", [scenario_id]
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, f"Scenario not found: {scenario_id}")
+        cols = [d[0] for d in conn.description]
+        scenario = dict(zip(cols, row))
+        for k, v in scenario.items():
+            if hasattr(v, 'isoformat'):
+                scenario[k] = v.isoformat()
+            elif isinstance(v, (float, int, str, bool, type(None))):
+                pass
+            else:
+                scenario[k] = str(v)
+
+        # Get available dataset versions
+        versions = conn.execute(
+            "SELECT dataset_version_id, name, description FROM dataset_version ORDER BY name"
+        ).fetchall()
+        dataset_versions = [
+            {"dataset_version_id": v[0], "name": v[1], "description": v[2]}
+            for v in versions
+        ]
+
+        return {
+            "scenario": scenario,
+            "dataset_versions": dataset_versions,
+        }
+    finally:
+        conn.close()
+
+
+@router.post("/scenarios/{scenario_id}/save-as")
+async def save_scenario_as(
+    scenario_id: str,
+    db: str,
+    request: Request,
+):
+    """Save As: duplicate scenario config in result DB with new ID and name.
+
+    Returns the new scenario_id and name.
+    """
+    db_path = _resolve_db(db, request)
+    reg = request.app.state.registry
+    project_id = db.replace('.duckdb', '')
+
+    conn = get_connection(db_path)
+    try:
+        # Read source scenario
+        row = conn.execute(
+            "SELECT * FROM scenario WHERE scenario_id = ?", [scenario_id]
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, f"Scenario not found: {scenario_id}")
+        cols = [d[0] for d in conn.description]
+        scenario = dict(zip(cols, row))
+
+        # Generate new ID
+        existing_rows = conn.execute("SELECT scenario_id FROM scenario").fetchall()
+        existing_ids = {r[0] for r in existing_rows}
+        new_id = generate_scenario_id(existing_ids)
+
+        # Generate new name
+        existing_names_rows = conn.execute("SELECT name FROM scenario").fetchall()
+        existing_names = {r[0] for r in existing_names_rows}
+        new_name = next_clone_name(scenario['name'], existing_names)
+
+        # Insert new scenario row
+        scenario['scenario_id'] = new_id
+        scenario['name'] = new_name
+        scenario['created_at'] = None  # let DB set default
+
+        insert_cols = [c for c in cols if c != 'created_at']
+        placeholders = ', '.join(['?'] * len(insert_cols))
+        values = [scenario[c] for c in insert_cols]
+
+        conn.execute(
+            f"INSERT INTO scenario ({', '.join(insert_cols)}) VALUES ({placeholders})",
+            values,
+        )
+    finally:
+        conn.close()
+
+    # Register in registry
+    registry.save_scenario(
+        reg,
+        scenario_id=new_id,
+        name=new_name,
+        project_id=project_id,
+        status='draft',
+    )
+
+    return {"scenario_id": new_id, "name": new_name}
+
+
+@router.get("/scenarios/{scenario_id}/export-yaml")
+async def export_scenario_yaml(scenario_id: str, db: str, request: Request):
+    """Export a scenario config as YAML."""
+    from fastapi.responses import Response
+
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        row = conn.execute(
+            "SELECT * FROM scenario WHERE scenario_id = ?", [scenario_id]
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, f"Scenario not found: {scenario_id}")
+        cols = [d[0] for d in conn.description]
+        scenario = dict(zip(cols, row))
+
+        # Convert types for YAML serialization
+        for k, v in scenario.items():
+            if hasattr(v, 'isoformat'):
+                scenario[k] = v.isoformat()
+            elif hasattr(v, '__float__'):
+                scenario[k] = float(v)
+
+        # Remove internal fields
+        for key in ('created_at',):
+            scenario.pop(key, None)
+
+        yaml_content = yaml.dump(scenario, default_flow_style=False, sort_keys=False)
+    finally:
+        conn.close()
+
+    return Response(
+        content=yaml_content,
+        media_type="application/x-yaml",
+        headers={"Content-Disposition": f'attachment; filename="{scenario_id}.yaml"'},
+    )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
