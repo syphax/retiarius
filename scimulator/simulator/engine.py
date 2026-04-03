@@ -1,9 +1,8 @@
 """
-Time-stepped drawdown simulation engine.
+Time-stepped simulation engine.
 
-Phase 1 implementation: no active decisions. Pre-loaded inventory is consumed
-by demand. Pre-scheduled inbound shipments arrive on their scheduled dates.
-Fulfillment uses a simple lowest-variable-cost-first routing.
+Supports both drawdown-only (Phase 1/2) and active ordering (Phase 3+).
+Fulfillment uses pluggable strategies. Reorder logic is optional.
 
 The engine is stateless — all state lives in DuckDB.
 """
@@ -19,6 +18,9 @@ import numpy as np
 import polars as pl
 
 from . import __version__
+from .fulfillment import create_strategy
+from .forecast import create_forecast
+from .reorder import create_reorder_policy, PurchaseOrder
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +37,12 @@ TERMINAL_STATES = {'shipped', 'disposed'}
 
 
 class DrawdownEngine:
-    """Time-stepped simulation engine for drawdown scenarios.
+    """Time-stepped simulation engine.
 
     Processes all events for time step T before advancing to T+1.
-    No ordering or replenishment decisions — just consumption of
-    pre-loaded inventory and arrival of pre-scheduled inbound shipments.
+    When reorder_logic is None (default), operates in drawdown mode:
+    pre-loaded inventory consumed by demand, no ordering decisions.
+    When reorder_logic is set, forecast and ordering modules are activated.
     """
 
     def __init__(self, conn: duckdb.DuckDBPyConnection, scenario_id: str):
@@ -75,7 +78,11 @@ class DrawdownEngine:
         self.demand_node_set_id = self.scenario.get('demand_node_set_id')
         self.edge_set_id = self.scenario.get('edge_set_id')
 
-        # RNG for stochastic elements (backorder/lost-sale coin flip)
+        # Phase 3 config
+        self.fulfillment_logic = self.scenario.get('fulfillment_logic') or 'closest_node_wins'
+        self.reorder_logic = self.scenario.get('reorder_logic')
+
+        # RNG for stochastic elements (backorder/lost-sale coin flip, forecast noise)
         self.rng = np.random.default_rng(42)
 
         # In-memory inventory state: {(dist_node_id, product_id, state): quantity}
@@ -90,16 +97,25 @@ class DrawdownEngine:
 
         # Pre-load edge routing info for fulfillment
         self._fulfillment_routes: Dict[str, List[Dict]] = {}
-        # Maps demand_node_id -> [(dist_node_id, edge_id, variable_cost)] sorted by cost
 
         # Zone lookup: edge_id -> zone (populated from zone_table for zone-derived edges)
         self._edge_zones: Dict[str, str] = {}
+
+        # Purchase orders (Phase 3)
+        self._purchase_orders: List[PurchaseOrder] = []
+
+        # Strategy and policy objects (initialized in run())
+        self._fulfillment_strategy = None
+        self._reorder_policy = None
 
     def run(self):
         """Execute the full simulation."""
         start_time = time.time()
         logger.info(f"Starting simulation: {self.scenario_id}")
         logger.info(f"  Period: {self.start_date} to {self.end_date}")
+        if self.reorder_logic:
+            logger.info(f"  Reorder logic: {self.reorder_logic}")
+        logger.info(f"  Fulfillment logic: {self.fulfillment_logic}")
 
         # Record run start
         self.conn.execute("""
@@ -114,6 +130,7 @@ class DrawdownEngine:
         try:
             self._initialize_inventory()
             self._build_fulfillment_routes()
+            self._initialize_strategies()
             self._run_time_steps()
 
             elapsed = time.time() - start_time
@@ -138,6 +155,53 @@ class DrawdownEngine:
             """, [datetime.now(), round(elapsed, 2), str(e), self.scenario_id])
             logger.error(f"Simulation failed: {e}")
             raise
+
+    def _initialize_strategies(self):
+        """Initialize fulfillment strategy and (optionally) reorder policy."""
+        # Fulfillment strategy
+        self._fulfillment_strategy = create_strategy(
+            self.fulfillment_logic, self._fulfillment_routes, self._inventory)
+
+        # Reorder logic (only if configured)
+        if not self.reorder_logic:
+            return
+
+        start = self.start_date
+        if isinstance(start, str):
+            start = date.fromisoformat(start)
+        end = self.end_date
+        if isinstance(end, str):
+            end = date.fromisoformat(end)
+
+        forecast = create_forecast(
+            method=self.scenario.get('forecast_method') or 'noisy_actuals',
+            conn=self.conn,
+            demand_version_id=self.demand_version_id,
+            bias=float(self.scenario.get('forecast_bias') or 0),
+            error=float(self.scenario.get('forecast_error') or 0),
+            distribution=self.scenario.get('forecast_distribution') or 'normal',
+            rng=self.rng,
+            product_set_id=self.product_set_id,
+            demand_node_set_id=self.demand_node_set_id,
+        )
+
+        self._reorder_policy = create_reorder_policy(
+            name=self.reorder_logic,
+            conn=self.conn,
+            scenario_id=self.scenario_id,
+            forecast=forecast,
+            fulfillment_routes=self._fulfillment_routes,
+            order_frequency_days=int(self.scenario.get('order_frequency_days') or 7),
+            safety_stock_days=int(self.scenario.get('safety_stock_days') or 14),
+            mrq_days=int(self.scenario.get('mrq_days') or 14),
+            consolidation_mode=self.scenario.get('consolidation_mode') or 'free',
+            min_cube_threshold=float(self.scenario.get('min_cube_threshold') or 0),
+            start_date=start,
+            end_date=end,
+            demand_version_id=self.demand_version_id,
+            product_set_id=self.product_set_id,
+            distribution_node_set_id=self.distribution_node_set_id,
+        )
 
     def _compute_total_steps(self) -> int:
         d = self.start_date
@@ -292,27 +356,63 @@ class DrawdownEngine:
     def _process_day(self, sim_date: date, sim_step: int):
         """Process all events for a single day."""
 
-        # 1. Process inbound arrivals
+        # 1. Process PO arrivals (Phase 3: dynamic purchase orders)
+        self._process_po_arrivals(sim_date, sim_step)
+
+        # 2. Process pre-scheduled inbound arrivals
         self._process_inbound_arrivals(sim_date, sim_step)
 
-        # 2. Process received -> saleable transitions
+        # 3. Process received -> saleable transitions
         self._process_receiving(sim_date, sim_step)
 
-        # 3. Try to fulfill backorders first (FIFO)
+        # 4. Try to fulfill backorders first (FIFO)
         self._process_backorders(sim_date, sim_step)
 
-        # 4. Process new demand for this day
+        # 5. Process new demand for this day
         self._process_demand(sim_date, sim_step)
 
-        # 5. Record daily fixed costs for distribution nodes
+        # 6. Reorder check (Phase 3: if reorder logic is configured)
+        if self._reorder_policy:
+            self._process_reorder(sim_date, sim_step)
+
+        # 7. Record daily fixed costs for distribution nodes
         self._record_fixed_costs(sim_date, sim_step)
 
-        # 6. Check for storage capacity overages (soft constraint penalties)
+        # 8. Check for storage capacity overages (soft constraint penalties)
         self._check_capacity_overages(sim_date, sim_step)
 
-        # 7. Write inventory snapshot (if enabled and on schedule)
+        # 9. Write inventory snapshot (if enabled and on schedule)
         if self.write_snapshots and sim_step % self.snapshot_interval == 0:
             self._write_snapshot(sim_date)
+
+    def _process_po_arrivals(self, sim_date: date, sim_step: int):
+        """Process purchase orders arriving today."""
+        for po in self._purchase_orders:
+            if po.status != 'in_transit':
+                continue
+            if po.expected_arrival is not None and po.expected_arrival <= sim_date:
+                # PO arrives: add to received inventory
+                key = (po.dest_node_id, po.product_id, 'received')
+                self._inventory[key] = self._inventory.get(key, 0) + po.quantity
+
+                po.status = 'received'
+                po.actual_arrival = sim_date
+
+                # Update DB record
+                self.conn.execute("""
+                    UPDATE purchase_order
+                    SET status = 'received', actual_arrival = ?
+                    WHERE scenario_id = ? AND po_id = ?
+                """, [sim_date, self.scenario_id, po.po_id])
+
+                self._log_event(sim_date, sim_step, 'po_arrived',
+                                node_id=po.dest_node_id, node_type='distribution',
+                                product_id=po.product_id, quantity=po.quantity,
+                                from_state='in_transit', to_state='received',
+                                detail=json.dumps({
+                                    'po_id': po.po_id,
+                                    'supply_node_id': po.supply_node_id,
+                                }))
 
     def _process_inbound_arrivals(self, sim_date: date, sim_step: int):
         """Process scheduled inbound shipments arriving today.
@@ -372,8 +472,7 @@ class DrawdownEngine:
     def _process_receiving(self, sim_date: date, sim_step: int):
         """Transition received inventory to saleable.
 
-        For simplicity in Phase 1, all received inventory becomes saleable
-        on the same day (order_response_time applies to outbound, not receiving).
+        For simplicity, all received inventory becomes saleable on the same day.
         """
         received_keys = [k for k in self._inventory
                          if k[2] == 'received' and self._inventory[k] > 0]
@@ -467,63 +566,39 @@ class DrawdownEngine:
     def _try_fulfill(self, sim_date: date, sim_step: int, demand_id: str,
                      demand_node_id: str, product_id: str, qty: float,
                      is_backorder: bool = False) -> float:
-        """Try to fulfill demand from distribution nodes connected to this demand node.
+        """Try to fulfill demand using the active fulfillment strategy.
 
         Returns the quantity successfully fulfilled.
         """
-        routes = self._fulfillment_routes.get(demand_node_id, [])
-        if not routes:
-            return 0.0
+        results = self._fulfillment_strategy.fulfill(
+            demand_node_id, product_id, qty)
 
         total_fulfilled = 0.0
-        remaining = qty
-
-        for route in routes:
-            if remaining <= 0:
-                break
-
-            dist_node_id = route['dist_node_id']
-            edge_id = route['edge_id']
-            variable_cost = route['cost_variable']
-
-            saleable_key = (dist_node_id, product_id, 'saleable')
-            available = self._inventory.get(saleable_key, 0)
-            if available <= 0:
-                continue
-
-            fulfill_qty = min(remaining, available)
-
-            # Deduct from saleable
-            self._inventory[saleable_key] -= fulfill_qty
-
-            # Add to committed (then immediately shipped for drawdown simplicity)
-            # In Phase 1, we collapse committed -> shipped into one step
-            shipped_key = (dist_node_id, product_id, 'shipped')
-            self._inventory[shipped_key] = self._inventory.get(shipped_key, 0) + fulfill_qty
-
-            # Calculate cost
-            cost = fulfill_qty * variable_cost
-
+        for r in results:
             event_type = 'backorder_fulfilled' if is_backorder else 'demand_fulfilled'
+            routes = self._fulfillment_routes.get(demand_node_id, [])
+            route = next((rt for rt in routes if rt['edge_id'] == r.edge_id), {})
             detail = {
                 'demand_node_id': demand_node_id,
-                'variable_cost_per_unit': variable_cost,
-                'distance': route['distance'],
+                'variable_cost_per_unit': r.cost / r.quantity if r.quantity > 0 else 0,
+                'distance': route.get('distance', 0),
             }
-            zone = route.get('zone') or self._edge_zones.get(edge_id)
+            zone = route.get('zone') or self._edge_zones.get(r.edge_id)
             if zone is not None:
                 detail['zone'] = zone
-            self._log_event(sim_date, sim_step, event_type,
-                            node_id=dist_node_id, node_type='distribution',
-                            edge_id=edge_id, product_id=product_id,
-                            quantity=fulfill_qty,
-                            from_state='saleable', to_state='shipped',
-                            demand_id=demand_id, cost=cost,
-                            duration=route.get('mean_transit_time'),
-                            detail=json.dumps(detail))
 
-            total_fulfilled += fulfill_qty
-            remaining -= fulfill_qty
+            self._log_event(sim_date, sim_step, event_type,
+                            node_id=r.dist_node_id, node_type='distribution',
+                            edge_id=r.edge_id, product_id=product_id,
+                            quantity=r.quantity,
+                            from_state='saleable', to_state='shipped',
+                            demand_id=demand_id, cost=r.cost,
+                            duration=route.get('mean_transit_time'),
+                            detail=json.dumps(detail),
+                            fulfillment_rank=r.rank,
+                            optimal_cost=r.optimal_cost)
+
+            total_fulfilled += r.quantity
 
         return total_fulfilled
 
@@ -546,6 +621,52 @@ class DrawdownEngine:
                             node_id=demand_node_id, node_type='demand',
                             product_id=product_id, quantity=qty,
                             demand_id=demand_id)
+
+    def _process_reorder(self, sim_date: date, sim_step: int):
+        """Run the reorder policy for this day."""
+        if not self._reorder_policy.should_reorder(sim_date):
+            return
+
+        # Compute new orders
+        new_orders = self._reorder_policy.compute_orders(
+            sim_date, self._inventory, self._purchase_orders)
+
+        if not new_orders:
+            return
+
+        # Apply consolidation
+        shipped, held = self._reorder_policy.apply_consolidation(new_orders)
+
+        # Record all orders (shipped + held)
+        for po in shipped + held:
+            self._purchase_orders.append(po)
+
+            # Write to DB
+            self.conn.execute("""
+                INSERT INTO purchase_order
+                (scenario_id, po_id, sim_date, supply_node_id, product_id,
+                 quantity, expected_arrival, dest_node_id, status, cube)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                self.scenario_id, po.po_id, po.sim_date,
+                po.supply_node_id, po.product_id, po.quantity,
+                po.expected_arrival, po.dest_node_id, po.status, po.cube,
+            ])
+
+            event_type = 'po_placed' if po.status == 'in_transit' else 'po_consolidating'
+            self._log_event(sim_date, sim_step, event_type,
+                            node_id=po.dest_node_id, node_type='distribution',
+                            product_id=po.product_id, quantity=po.quantity,
+                            cost=0,
+                            detail=json.dumps({
+                                'po_id': po.po_id,
+                                'supply_node_id': po.supply_node_id,
+                                'expected_arrival': str(po.expected_arrival),
+                                'cube': po.cube,
+                            }))
+
+        logger.info(f"Day {sim_date}: placed {len(shipped)} POs, "
+                     f"{len(held)} held for consolidation")
 
     def _record_fixed_costs(self, sim_date: date, sim_step: int):
         """Record daily fixed costs for active distribution nodes."""
@@ -675,7 +796,9 @@ class DrawdownEngine:
                    quantity: float = None, from_state: str = None,
                    to_state: str = None, demand_id: str = None,
                    cost: float = None, duration: float = None,
-                   detail: str = None):
+                   detail: str = None,
+                   fulfillment_rank: int = None,
+                   optimal_cost: float = None):
         """Buffer an event for batch insertion."""
         if not self.write_event_log:
             return
@@ -685,6 +808,7 @@ class DrawdownEngine:
             self.scenario_id, self._event_counter, sim_date, sim_step,
             event_type, node_id, node_type, edge_id, product_id,
             quantity, from_state, to_state, demand_id, cost, duration, detail,
+            fulfillment_rank, optimal_cost,
         ))
 
     def _flush_events(self):
@@ -703,6 +827,7 @@ class DrawdownEngine:
                 'from_state': pl.Utf8, 'to_state': pl.Utf8,
                 'demand_id': pl.Utf8, 'cost': pl.Float64,
                 'duration': pl.Float64, 'detail': pl.Utf8,
+                'fulfillment_rank': pl.Int32, 'optimal_cost': pl.Float64,
             },
             orient='row',
         )
@@ -710,7 +835,8 @@ class DrawdownEngine:
             INSERT INTO event_log (
                 scenario_id, event_id, sim_date, sim_step, event_type,
                 node_id, node_type, edge_id, product_id, quantity,
-                from_state, to_state, demand_id, cost, duration, detail
+                from_state, to_state, demand_id, cost, duration, detail,
+                fulfillment_rank, optimal_cost
             ) SELECT * FROM df
         """)
         logger.info(f"Flushed {len(self._event_buffer)} events")

@@ -216,6 +216,31 @@ class ScenarioConfig:
     demand_node_set_id: Optional[str] = None
     edge_set_id: Optional[str] = None
 
+    # --- Phase 3: Ordering & Routing Logic ---
+
+    # Fulfillment logic
+    fulfillment_logic: str = "closest_node_wins"  # or "closest_node_only"
+
+    # Reorder logic (None = drawdown only, no reorder)
+    reorder_logic: Optional[str] = None  # "periodic"
+    reorder_scope: str = "national"
+    reorder_allocation: str = "fair_share"
+
+    # Forecast
+    forecast_method: str = "noisy_actuals"
+    forecast_bias: float = 0.0            # percentage, e.g. 0.10 for +10%
+    forecast_error: float = 0.0           # 2-sigma at monthly horizon
+    forecast_distribution: str = "normal"  # normal, lognormal, poisson
+
+    # Reorder parameters (in days)
+    order_frequency_days: int = 7          # R: reorder interval
+    safety_stock_days: int = 14            # S: safety stock
+    mrq_days: int = 14                     # M: minimum replenishment quantity
+
+    # Supplier consolidation
+    consolidation_mode: str = "free"       # "free" or "constrained"
+    min_cube_threshold: float = 0.0        # min cube (CuFt) for constrained mode
+
     # Scenario params (key-value overrides)
     params: Dict[str, str] = field(default_factory=dict)
     notes: str = ""

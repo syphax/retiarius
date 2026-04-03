@@ -65,6 +65,10 @@ def load_scenario_from_yaml(yaml_path: str) -> ScenarioConfig:
         'params', 'notes',
         'product_set_id', 'supply_node_set_id', 'distribution_node_set_id',
         'demand_node_set_id', 'edge_set_id',
+        'fulfillment_logic', 'reorder_logic', 'reorder_scope', 'reorder_allocation',
+        'forecast_method', 'forecast_bias', 'forecast_error', 'forecast_distribution',
+        'order_frequency_days', 'safety_stock_days', 'mrq_days',
+        'consolidation_mode', 'min_cube_threshold',
     }
     top = {k: v for k, v in raw.items() if k in top_keys}
 
@@ -602,8 +606,13 @@ def _load_scenario(conn, config: ScenarioConfig):
             write_event_log, write_snapshots, snapshot_interval_days,
             product_set_id, supply_node_set_id,
             distribution_node_set_id, demand_node_set_id, edge_set_id,
+            fulfillment_logic, reorder_logic, reorder_scope, reorder_allocation,
+            forecast_method, forecast_bias, forecast_error, forecast_distribution,
+            order_frequency_days, safety_stock_days, mrq_days,
+            consolidation_mode, min_cube_threshold,
             created_at, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, [
         config.scenario_id, config.name, config.description,
         config.dataset_version_id, config.demand_version_id,
@@ -616,6 +625,13 @@ def _load_scenario(conn, config: ScenarioConfig):
         config.product_set_id, config.supply_node_set_id,
         config.distribution_node_set_id, config.demand_node_set_id,
         config.edge_set_id,
+        config.fulfillment_logic, config.reorder_logic,
+        config.reorder_scope, config.reorder_allocation,
+        config.forecast_method, config.forecast_bias,
+        config.forecast_error, config.forecast_distribution,
+        config.order_frequency_days, config.safety_stock_days,
+        config.mrq_days, config.consolidation_mode,
+        config.min_cube_threshold,
         datetime.now(), config.notes,
     ])
 

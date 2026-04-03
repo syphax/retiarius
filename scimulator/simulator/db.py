@@ -47,6 +47,56 @@ def _migrate(conn: duckdb.DuckDBPyConnection):
             if col not in scen_cols:
                 conn.execute(f"ALTER TABLE scenario ADD COLUMN {col} TEXT")
 
+    # v0.4: Phase 3 ordering & routing columns on scenario
+    if scen_cols:
+        phase3_cols = {
+            'fulfillment_logic': "TEXT DEFAULT 'closest_node_wins'",
+            'reorder_logic': 'TEXT',
+            'reorder_scope': "TEXT DEFAULT 'national'",
+            'reorder_allocation': "TEXT DEFAULT 'fair_share'",
+            'forecast_method': "TEXT DEFAULT 'noisy_actuals'",
+            'forecast_bias': 'DECIMAL(6,4) DEFAULT 0',
+            'forecast_error': 'DECIMAL(6,4) DEFAULT 0',
+            'forecast_distribution': "TEXT DEFAULT 'normal'",
+            'order_frequency_days': 'INTEGER DEFAULT 7',
+            'safety_stock_days': 'INTEGER DEFAULT 14',
+            'mrq_days': 'INTEGER DEFAULT 14',
+            'consolidation_mode': "TEXT DEFAULT 'free'",
+            'min_cube_threshold': 'DECIMAL(12,2) DEFAULT 0',
+        }
+        for col, col_type in phase3_cols.items():
+            if col not in scen_cols:
+                conn.execute(f"ALTER TABLE scenario ADD COLUMN {col} {col_type}")
+
+    # v0.4: fulfillment_rank and optimal_cost on event_log
+    if cols:  # cols = event_log columns from above
+        for col, col_type in (('fulfillment_rank', 'INTEGER'),
+                              ('optimal_cost', 'DECIMAL(12,4)')):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE event_log ADD COLUMN {col} {col_type}")
+
+    # v0.4: purchase_order table
+    tables = {r[0] for r in conn.execute(
+        "SELECT table_name FROM information_schema.tables"
+    ).fetchall()}
+    if 'purchase_order' not in tables:
+        conn.execute("""
+            CREATE TABLE purchase_order (
+                scenario_id TEXT NOT NULL,
+                po_id TEXT NOT NULL,
+                sim_date DATE NOT NULL,
+                supply_node_id TEXT NOT NULL,
+                product_id TEXT NOT NULL,
+                quantity DECIMAL(12,2) NOT NULL,
+                expected_arrival DATE,
+                actual_arrival DATE,
+                dest_node_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                cube DECIMAL(12,2),
+                PRIMARY KEY (scenario_id, po_id)
+            )
+        """)
+
 
 def _create_schema(conn: duckdb.DuckDBPyConnection):
     """Create all tables in the SCimulator schema."""
@@ -88,6 +138,19 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             distribution_node_set_id TEXT,
             demand_node_set_id TEXT,
             edge_set_id TEXT,
+            fulfillment_logic TEXT DEFAULT 'closest_node_wins',
+            reorder_logic TEXT,
+            reorder_scope TEXT DEFAULT 'national',
+            reorder_allocation TEXT DEFAULT 'fair_share',
+            forecast_method TEXT DEFAULT 'noisy_actuals',
+            forecast_bias DECIMAL(6,4) DEFAULT 0,
+            forecast_error DECIMAL(6,4) DEFAULT 0,
+            forecast_distribution TEXT DEFAULT 'normal',
+            order_frequency_days INTEGER DEFAULT 7,
+            safety_stock_days INTEGER DEFAULT 14,
+            mrq_days INTEGER DEFAULT 14,
+            consolidation_mode TEXT DEFAULT 'free',
+            min_cube_threshold DECIMAL(12,2) DEFAULT 0,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             notes TEXT
         )
@@ -443,6 +506,25 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
         )
     """)
 
+    # --- Purchase Orders (Phase 3: dynamic ordering) ---
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS purchase_order (
+            scenario_id TEXT NOT NULL,
+            po_id TEXT NOT NULL,
+            sim_date DATE NOT NULL,
+            supply_node_id TEXT NOT NULL,
+            product_id TEXT NOT NULL,
+            quantity DECIMAL(12,2) NOT NULL,
+            expected_arrival DATE,
+            actual_arrival DATE,
+            dest_node_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            cube DECIMAL(12,2),
+            PRIMARY KEY (scenario_id, po_id)
+        )
+    """)
+
     # --- Simulation Output Tables ---
 
     conn.execute("""
@@ -462,7 +544,9 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             demand_id TEXT,
             cost DECIMAL(12,4),
             duration DECIMAL(10,2),
-            detail TEXT
+            detail TEXT,
+            fulfillment_rank INTEGER,
+            optimal_cost DECIMAL(12,4)
         )
     """)
 
@@ -501,6 +585,7 @@ def clear_scenario_results(conn: duckdb.DuckDBPyConnection, scenario_id: str):
     """
     conn.execute("DELETE FROM event_log WHERE scenario_id = ?", [scenario_id])
     conn.execute("DELETE FROM inventory_snapshot WHERE scenario_id = ?", [scenario_id])
+    conn.execute("DELETE FROM purchase_order WHERE scenario_id = ?", [scenario_id])
     conn.execute("DELETE FROM run_metadata WHERE scenario_id = ?", [scenario_id])
 
 

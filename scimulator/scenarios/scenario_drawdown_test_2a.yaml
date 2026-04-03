@@ -48,8 +48,8 @@ initial_inventory_csv: "scimulator/data/initial_inventory-drawdown_test_2a.csv"
 suppliers:
   - supplier_id: "SUP_DOMESTIC"
     name: "Domestic Supplier"
-    default_lead_time: 1.0
-    default_qty_reliability: 1.0
+    default_lead_time: 30.0
+    default_qty_reliability: 0.0
 
 supply_nodes:
   - supply_node_id: "SN_DOMESTIC_01"
