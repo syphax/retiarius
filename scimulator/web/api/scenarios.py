@@ -717,7 +717,7 @@ EDITABLE_SCENARIO_FIELDS = {
     'product_set_id', 'supply_node_set_id', 'distribution_node_set_id',
     'demand_node_set_id', 'edge_set_id',
     'fulfillment_logic',
-    'reorder_logic', 'reorder_scope', 'reorder_allocation',
+    'reorder_logic', 'reorder_resolution', 'reorder_allocation',
     'forecast_method', 'forecast_bias', 'forecast_error', 'forecast_distribution',
     'order_frequency_days', 'safety_stock_days', 'mrq_days',
     'consolidation_mode', 'min_cube_threshold',
@@ -926,6 +926,72 @@ async def export_scenario_yaml(scenario_id: str, db: str, request: Request):
         media_type="application/x-yaml",
         headers={"Content-Disposition": f'attachment; filename="{scenario_id}.yaml"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Dataset management
+# ---------------------------------------------------------------------------
+
+@router.get("/datasets")
+async def list_datasets(db: str, request: Request):
+    """List all dataset versions with row counts per data table.
+
+    Returns dataset versions with counts for demand, inbound_schedule,
+    and initial_inventory tables.
+    """
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        # Get all dataset versions
+        versions = conn.execute("""
+            SELECT dataset_version_id, name, description, parent_version_id,
+                   created_at, created_by
+            FROM dataset_version
+            ORDER BY name
+        """).fetchall()
+
+        # For each version, count rows in each data table
+        result = []
+        for v in versions:
+            vid = v[0]
+            counts: dict[str, int] = {}
+
+            for table in ('demand', 'inbound_schedule', 'initial_inventory'):
+                try:
+                    row = conn.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE dataset_version_id = ?",
+                        [vid],
+                    ).fetchone()
+                    counts[table] = row[0] if row else 0
+                except Exception:
+                    counts[table] = 0
+
+            # Which scenarios use this version (as default or override)
+            scenario_rows = conn.execute("""
+                SELECT scenario_id, name FROM scenario
+                WHERE dataset_version_id = ?
+                   OR demand_version_id = ?
+                   OR inbound_version_id = ?
+                   OR inventory_version_id = ?
+            """, [vid, vid, vid, vid]).fetchall()
+
+            result.append({
+                'dataset_version_id': vid,
+                'name': v[1],
+                'description': v[2],
+                'parent_version_id': v[3],
+                'created_at': str(v[4]) if v[4] else None,
+                'created_by': v[5],
+                'row_counts': counts,
+                'scenarios': [
+                    {'scenario_id': s[0], 'name': s[1]}
+                    for s in scenario_rows
+                ],
+            })
+
+        return result
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

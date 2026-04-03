@@ -7,35 +7,37 @@ import {
   duplicateScenario,
 } from '../api/client'
 import type { DatasetVersionInfo } from '../api/client'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
+import HELP_TEXT from '../data/helpText'
 
 // ── Field definitions ────────────────────────────────────────────────
 
 interface FieldDef {
   key: string
   label: string
-  type: 'text' | 'number' | 'date' | 'select' | 'checkbox' | 'textarea'
+  type: 'text' | 'number' | 'date' | 'select' | 'checkbox' | 'textarea' | 'percent' | 'slider'
   options?: { value: string; label: string }[]
   readOnly?: boolean
   placeholder?: string
   step?: string
   min?: number
   max?: number
+  fullWidth?: boolean  // spans entire grid row
 }
 
+// General: scenario_id, name, description, start_date/end_date (own row), time_resolution, then rest
 const GENERAL_FIELDS: FieldDef[] = [
   { key: 'scenario_id', label: 'Scenario ID', type: 'text', readOnly: true },
   { key: 'name', label: 'Name', type: 'text' },
-  { key: 'description', label: 'Description', type: 'textarea' },
-  { key: 'currency_code', label: 'Currency Code', type: 'text', placeholder: 'USD' },
+  { key: 'description', label: 'Description', type: 'textarea', fullWidth: true },
+  { key: 'start_date', label: 'Start Date', type: 'date' },
+  { key: 'end_date', label: 'End Date', type: 'date' },
   { key: 'time_resolution', label: 'Time Resolution', type: 'select', options: [
     { value: 'daily', label: 'Daily' },
     { value: 'weekly', label: 'Weekly' },
   ]},
-  { key: 'start_date', label: 'Start Date', type: 'date' },
-  { key: 'end_date', label: 'End Date', type: 'date' },
+  { key: 'currency_code', label: 'Currency Code', type: 'text', placeholder: 'USD' },
   { key: 'warm_up_days', label: 'Warm-up Days', type: 'number', min: 0 },
-  { key: 'backorder_probability', label: 'Backorder Probability', type: 'number', step: '0.01', min: 0, max: 1 },
   { key: 'write_event_log', label: 'Write Event Log', type: 'checkbox' },
   { key: 'write_snapshots', label: 'Write Snapshots', type: 'checkbox' },
   { key: 'snapshot_interval_days', label: 'Snapshot Interval (days)', type: 'number', min: 1 },
@@ -48,17 +50,34 @@ const DATASET_KEYS = [
   { key: 'inventory_version_id', label: 'Initial Inventory (override)' },
 ]
 
-const FULFILLMENT_FIELDS: FieldDef[] = [
-  { key: 'fulfillment_logic', label: 'Fulfillment Logic', type: 'select', options: [
+// Fulfillment: logic selector on own row, then backorder probability slider
+const FULFILLMENT_METHOD: FieldDef = {
+  key: 'fulfillment_logic', label: 'Fulfillment Logic', type: 'select', fullWidth: true, options: [
     { value: 'closest_node_wins', label: 'Closest Node Wins' },
     { value: 'closest_node_only', label: 'Closest Node Only' },
-  ]},
+  ],
+}
+
+const FULFILLMENT_PARAMS: FieldDef[] = [
+  { key: 'backorder_probability', label: 'Backorder Probability', type: 'slider', min: 0, max: 100, step: '1' },
 ]
 
-const ORDERING_FIELDS: FieldDef[] = [
-  { key: 'reorder_logic', label: 'Reorder Logic', type: 'select', options: [
-    { value: '', label: 'None' },
+// Ordering: trigger selector on own row, then params (shown only when trigger is set)
+const ORDERING_METHOD: FieldDef = {
+  key: 'reorder_logic', label: 'Reorder Trigger', type: 'select', fullWidth: true, options: [
+    { value: '', label: 'None (drawdown only)' },
     { value: 'periodic', label: 'Periodic' },
+  ],
+}
+
+const ORDERING_PARAMS: FieldDef[] = [
+  { key: 'reorder_resolution', label: 'Reorder Resolution', type: 'select', options: [
+    { value: '', label: 'None' },
+    { value: 'national', label: 'National' },
+    { value: 'node', label: 'Node' },
+  ]},
+  { key: 'reorder_allocation', label: 'Reorder Allocation', type: 'select', options: [
+    { value: 'fair_share', label: 'Fair Share' },
   ]},
   { key: 'order_frequency_days', label: 'Order Frequency (days)', type: 'number', min: 1 },
   { key: 'safety_stock_days', label: 'Safety Stock (days)', type: 'number', min: 0 },
@@ -68,13 +87,17 @@ const ORDERING_FIELDS: FieldDef[] = [
   ]},
 ]
 
-const FORECAST_FIELDS: FieldDef[] = [
-  { key: 'forecast_method', label: 'Forecast Method', type: 'select', options: [
+// Forecasting: method selector on own row, then params (shown only when method is set)
+const FORECAST_METHOD: FieldDef = {
+  key: 'forecast_method', label: 'Forecast Method', type: 'select', fullWidth: true, options: [
     { value: '', label: 'None' },
     { value: 'noisy_actuals', label: 'Noisy Actuals' },
-  ]},
-  { key: 'forecast_bias', label: 'Forecast Bias', type: 'number', step: '0.01' },
-  { key: 'forecast_error', label: 'Forecast Error', type: 'number', step: '0.01', min: 0 },
+  ],
+}
+
+const FORECAST_PARAMS: FieldDef[] = [
+  { key: 'forecast_bias', label: 'Forecast Bias', type: 'percent', step: '1', min: -100, max: 100 },
+  { key: 'forecast_error', label: 'Forecast Error', type: 'percent', step: '1', min: 0, max: 100 },
   { key: 'forecast_distribution', label: 'Forecast Distribution', type: 'select', options: [
     { value: 'normal', label: 'Normal' },
     { value: 'lognormal', label: 'Log-Normal' },
@@ -99,7 +122,7 @@ function validate(values: Record<string, unknown>): ValidationError[] {
     errors.push({ field: 'end_date', message: 'End date must be after start date' })
   if (n('warm_up_days') < 0) errors.push({ field: 'warm_up_days', message: 'Must be >= 0' })
   const bp = n('backorder_probability')
-  if (bp < 0 || bp > 1) errors.push({ field: 'backorder_probability', message: 'Must be between 0 and 1' })
+  if (bp < 0 || bp > 1) errors.push({ field: 'backorder_probability', message: 'Must be between 0% and 100%' })
   if (values['write_snapshots'] && n('snapshot_interval_days') < 1)
     errors.push({ field: 'snapshot_interval_days', message: 'Must be >= 1' })
 
@@ -108,11 +131,29 @@ function validate(values: Record<string, unknown>): ValidationError[] {
     if (n('order_frequency_days') < 1) errors.push({ field: 'order_frequency_days', message: 'Must be >= 1' })
     if (n('safety_stock_days') < 0) errors.push({ field: 'safety_stock_days', message: 'Must be >= 0' })
   }
-  if (n('forecast_error') < 0) errors.push({ field: 'forecast_error', message: 'Must be >= 0' })
+
+  const fb = n('forecast_bias')
+  if (fb < -1 || fb > 1) errors.push({ field: 'forecast_bias', message: 'Must be between -100% and +100%' })
+  const fe = n('forecast_error')
+  if (fe < 0 || fe > 1) errors.push({ field: 'forecast_error', message: 'Must be between 0% and 100%' })
 
   if (!s('dataset_version_id')) errors.push({ field: 'dataset_version_id', message: 'Required' })
 
   return errors
+}
+
+// ── Helpers: percent ↔ decimal ──────────────────────────────────────
+
+function decimalToPercent(val: unknown): string {
+  if (val === '' || val === null || val === undefined) return ''
+  const n = Number(val)
+  if (isNaN(n)) return ''
+  return String(Math.round(n * 100))
+}
+
+function percentToDecimal(pctStr: string): number | '' {
+  if (pctStr === '') return ''
+  return Number(pctStr) / 100
 }
 
 // ── Component ────────────────────────────────────────────────────────
@@ -126,15 +167,13 @@ interface Props {
 
 export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onStatusChange }: Props) {
   const navigate = useNavigate()
+  const { dbName: routeDbName } = useParams()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
-  // Form values (current edits)
   const [values, setValues] = useState<Record<string, unknown>>({})
-  // Saved baseline (for change highlighting and discard)
   const [savedValues, setSavedValues] = useState<Record<string, unknown>>({})
-  // Undo snapshot (previous saved state, for undo after save)
   const undoSnapshot = useRef<Record<string, unknown> | null>(null)
 
   const [datasetVersions, setDatasetVersions] = useState<DatasetVersionInfo[]>([])
@@ -171,7 +210,6 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
       })
   }, [dbName, scenarioId])
 
-  // Check if a field has been modified from saved state
   const isModified = (key: string) => {
     const current = values[key] ?? ''
     const saved = savedValues[key] ?? ''
@@ -180,21 +218,14 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
 
   const hasAnyChanges = Object.keys(values).some(k => isModified(k))
 
-  // Get validation error for a field (for inline display)
   const fieldError = (key: string) => validationErrors.find(e => e.field === key)?.message
 
-  // Update a single field
   const updateField = (key: string, value: unknown) => {
     setValues(prev => ({ ...prev, [key]: value }))
-    // Clear validation error for this field
     setValidationErrors(prev => prev.filter(e => e.field !== key))
   }
 
-  // Determine if field had prior results (for results-invalidation toast)
-  const hadResults = savedValues['scenario_id'] && (
-    // Check if there's run metadata — the presence of scenario in result DB implies it may have been run
-    true // We'll check registry status instead
-  )
+  const hadResults = !!savedValues['scenario_id']
 
   // ── Actions ──────────────────────────────────────────────────────
 
@@ -205,7 +236,6 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
       return
     }
 
-    // Collect only changed fields
     const changed: Record<string, unknown> = {}
     for (const key of Object.keys(values)) {
       if (isModified(key) && key !== 'scenario_id' && key !== 'created_at') {
@@ -220,16 +250,13 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
     setSaving(true)
     setError(null)
     try {
-      // Stash current saved state for undo
       undoSnapshot.current = { ...savedValues }
-
       await updateScenarioConfig(dbName, scenarioId, changed)
       setSavedValues({ ...values })
       setValidationErrors([])
 
-      // Show combined toast
       if (hadResults) {
-        showToast('Saved. Results are no longer relevant. [Undo] to preserve them and dupe the scenario.', true)
+        showToast('Saved. Results are no longer relevant.', true)
       } else {
         showToast('Saved.', true)
       }
@@ -246,7 +273,6 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
     setSaving(true)
     setError(null)
     try {
-      // Compute diff between current saved and snapshot
       const revert: Record<string, unknown> = {}
       for (const key of Object.keys(undoSnapshot.current)) {
         if (key === 'scenario_id' || key === 'created_at') continue
@@ -282,7 +308,6 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
     try {
       const result = await saveScenarioAs(dbName, scenarioId)
       showToast(`Created "${result.name}" (${result.scenario_id.toUpperCase()})`)
-      // Navigate to the new scenario's config
       navigate(`/scenario/${encodeURIComponent(dbName)}/${encodeURIComponent(result.scenario_id)}?tab=configure`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -307,13 +332,26 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
 
   // ── Rendering helpers ────────────────────────────────────────────
 
+  function helpIcon(key: string) {
+    const text = HELP_TEXT[key]
+    if (!text) return null
+    return (
+      <span className="help-icon" data-tooltip={text}>?</span>
+    )
+  }
+
   function renderField(field: FieldDef, disabled: boolean = false) {
     const val = values[field.key]
     const modified = isModified(field.key)
     const errMsg = fieldError(field.key)
     const isDisabled = field.readOnly || disabled || saving
 
-    const wrapperClass = `config-field${modified ? ' config-field-modified' : ''}${errMsg ? ' config-field-error' : ''}`
+    const wrapperClass = [
+      'config-field',
+      modified ? 'config-field-modified' : '',
+      errMsg ? 'config-field-error' : '',
+      field.fullWidth ? 'config-field-full' : '',
+    ].filter(Boolean).join(' ')
 
     if (field.type === 'checkbox') {
       return (
@@ -326,6 +364,7 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
               disabled={isDisabled}
             />
             {field.label}
+            {helpIcon(field.key)}
           </label>
           {errMsg && <div className="config-field-msg">{errMsg}</div>}
         </div>
@@ -335,7 +374,7 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
     if (field.type === 'textarea') {
       return (
         <div key={field.key} className={wrapperClass}>
-          <label>{field.label}</label>
+          <label>{field.label} {helpIcon(field.key)}</label>
           <textarea
             value={String(val ?? '')}
             onChange={e => updateField(field.key, e.target.value)}
@@ -351,7 +390,7 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
     if (field.type === 'select') {
       return (
         <div key={field.key} className={wrapperClass}>
-          <label>{field.label}</label>
+          <label>{field.label} {helpIcon(field.key)}</label>
           <select
             value={String(val ?? '')}
             onChange={e => updateField(field.key, e.target.value)}
@@ -366,9 +405,66 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
       )
     }
 
+    // Slider: 0-100% slider with text box (stored as decimal 0-1)
+    if (field.type === 'slider') {
+      const pctVal = decimalToPercent(val)
+      return (
+        <div key={field.key} className={wrapperClass}>
+          <label>{field.label} {helpIcon(field.key)}</label>
+          <div className="slider-group">
+            <input
+              type="range"
+              min={field.min ?? 0}
+              max={field.max ?? 100}
+              step={field.step ?? '1'}
+              value={pctVal || '0'}
+              onChange={e => updateField(field.key, percentToDecimal(e.target.value))}
+              disabled={isDisabled}
+              className="slider-input"
+            />
+            <input
+              type="number"
+              min={field.min ?? 0}
+              max={field.max ?? 100}
+              step={field.step ?? '1'}
+              value={pctVal}
+              onChange={e => updateField(field.key, percentToDecimal(e.target.value))}
+              disabled={isDisabled}
+              className="slider-text"
+            />
+            <span className="slider-unit">%</span>
+          </div>
+          {errMsg && <div className="config-field-msg">{errMsg}</div>}
+        </div>
+      )
+    }
+
+    // Percent: stored as decimal, displayed as % integer
+    if (field.type === 'percent') {
+      const pctVal = decimalToPercent(val)
+      return (
+        <div key={field.key} className={wrapperClass}>
+          <label>{field.label} {helpIcon(field.key)}</label>
+          <div className="percent-group">
+            <input
+              type="number"
+              min={field.min ?? -100}
+              max={field.max ?? 100}
+              step={field.step ?? '1'}
+              value={pctVal}
+              onChange={e => updateField(field.key, percentToDecimal(e.target.value))}
+              disabled={isDisabled}
+            />
+            <span className="slider-unit">%</span>
+          </div>
+          {errMsg && <div className="config-field-msg">{errMsg}</div>}
+        </div>
+      )
+    }
+
     return (
       <div key={field.key} className={wrapperClass}>
-        <label>{field.label}</label>
+        <label>{field.label} {helpIcon(field.key)}</label>
         <input
           type={field.type}
           value={String(val ?? '')}
@@ -395,7 +491,7 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
 
     return (
       <div key={field.key} className={wrapperClass}>
-        <label>{field.label}</label>
+        <label>{field.label} {helpIcon(field.key)}</label>
         <select
           value={String(val ?? '')}
           onChange={e => updateField(field.key, e.target.value || null)}
@@ -450,6 +546,9 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
 
       {/* Input Datasets */}
       <ConfigSection title="Input Datasets" defaultOpen>
+        <div className="config-section-links">
+          <a href={`/datasets/${encodeURIComponent(routeDbName || dbName)}`}>Manage Datasets</a>
+        </div>
         <div className="config-grid">
           {DATASET_KEYS.map(f => renderDatasetField(f))}
         </div>
@@ -458,21 +557,24 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
       {/* Fulfillment */}
       <ConfigSection title="Fulfillment" defaultOpen>
         <div className="config-grid">
-          {FULFILLMENT_FIELDS.map(f => renderField(f))}
+          {renderField(FULFILLMENT_METHOD)}
+          {FULFILLMENT_PARAMS.map(f => renderField(f))}
         </div>
       </ConfigSection>
 
       {/* Ordering */}
       <ConfigSection title="Ordering" defaultOpen>
         <div className="config-grid">
-          {ORDERING_FIELDS.map((f, i) => renderField(f, i > 0 && !reorderActive))}
+          {renderField(ORDERING_METHOD)}
+          {reorderActive && ORDERING_PARAMS.map(f => renderField(f))}
         </div>
       </ConfigSection>
 
       {/* Forecasting */}
       <ConfigSection title="Forecasting" defaultOpen>
         <div className="config-grid">
-          {FORECAST_FIELDS.map((f, i) => renderField(f, i > 0 && !forecastActive))}
+          {renderField(FORECAST_METHOD)}
+          {forecastActive && FORECAST_PARAMS.map(f => renderField(f))}
         </div>
       </ConfigSection>
 
@@ -492,14 +594,14 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
       {/* Notes */}
       <ConfigSection title="Notes">
         <div className="config-grid">
-          {renderField({ key: 'notes', label: 'Notes', type: 'textarea' })}
+          {renderField({ key: 'notes', label: 'Notes', type: 'textarea', fullWidth: true })}
         </div>
       </ConfigSection>
 
       {/* Toast */}
       {toast && (
         <div className="config-toast">
-          <span>{toast.message.replace(' [Undo] ', ' ')}</span>
+          <span>{toast.message}</span>
           {toast.showUndo && (
             <button className="config-toast-undo" onClick={handleUndo}>Undo</button>
           )}

@@ -4,6 +4,7 @@ import ProjectsPage from './pages/ProjectsPage'
 import HomePage from './pages/HomePage'
 import ScenarioPage from './pages/ScenarioPage'
 import RunPage from './pages/RunPage'
+import DatasetsPage from './pages/DatasetsPage'
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
         <Route path="/project/:dbName/:projectId" element={<HomePage />} />
         <Route path="/run" element={<RunPage />} />
         <Route path="/scenario/:dbName/:scenarioId" element={<ScenarioPage />} />
+        <Route path="/datasets/:dbName" element={<DatasetsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

@@ -555,6 +555,18 @@ select {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
 }
+.config-field-full {
+  grid-column: 1 / -1;
+}
+
+/* Section links (e.g. "Manage Datasets") */
+.config-section-links {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.config-section-links a {
+  color: var(--accent-light);
+}
 
 .config-field {
   display: flex;
@@ -634,6 +646,110 @@ select {
   margin: 0;
 }
 
+/* Help icon with CSS tooltip */
+.help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: help;
+  margin-left: 4px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  position: relative;
+}
+.help-icon:hover {
+  background: var(--text-muted);
+  color: var(--bg);
+}
+.help-icon::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 400;
+  padding: 6px 10px;
+  white-space: nowrap;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 100;
+}
+.help-icon:hover::after {
+  opacity: 1;
+}
+
+/* Slider group (range + text input) */
+.slider-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.slider-input {
+  flex: 1;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+.slider-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+.slider-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.slider-text {
+  width: 60px;
+  padding: 4px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  text-align: right;
+}
+.slider-unit {
+  color: var(--text-muted);
+  font-size: 13px;
+  min-width: 16px;
+}
+
+/* Percent group (number input + %) */
+.percent-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.percent-group input {
+  width: 80px;
+  text-align: right;
+}
+
 /* Toast */
 .config-toast {
   position: fixed;
@@ -689,6 +805,33 @@ select {
 /* Modified status badge */
 .status-modified { background: rgba(242, 142, 43, 0.15); color: var(--warning); }
 .status-draft { background: rgba(122, 127, 138, 0.15); color: var(--text-muted); }
+
+/* Datasets page */
+.datasets-page h1 {
+  margin-bottom: 4px;
+}
+.datasets-subtitle {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+.datasets-subtitle code {
+  font-family: var(--mono);
+  background: var(--bg-surface);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.datasets-section {
+  margin-bottom: 32px;
+}
+.datasets-section h2 {
+  font-size: 16px;
+  margin-bottom: 12px;
+  color: var(--text-h);
+}
+.text-muted {
+  color: var(--text-muted);
+}
 
 /* Responsive */
 @media (max-width: 768px) {

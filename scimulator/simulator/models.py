@@ -223,7 +223,7 @@ class ScenarioConfig:
 
     # Reorder logic (None = drawdown only, no reorder)
     reorder_logic: Optional[str] = None  # "periodic"
-    reorder_scope: str = "national"
+    reorder_resolution: str = "national"
     reorder_allocation: str = "fair_share"
 
     # Forecast

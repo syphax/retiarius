@@ -1,0 +1,59 @@
+/**
+ * Help text for scenario configuration fields.
+ * Each key matches a field key in the config form.
+ *
+ * To edit help text, update the values here.
+ * A YAML version (help-text.yaml) is also maintained for convenience.
+ */
+const HELP_TEXT: Record<string, string> = {
+  // General
+  scenario_id: '(Insert help text)',
+  name: '(Insert help text)',
+  description: '(Insert help text)',
+  currency_code: '(Insert help text)',
+  time_resolution: '(Insert help text)',
+  start_date: '(Insert help text)',
+  end_date: '(Insert help text)',
+  warm_up_days: '(Insert help text)',
+  write_event_log: '(Insert help text)',
+  write_snapshots: '(Insert help text)',
+  snapshot_interval_days: '(Insert help text)',
+
+  // Input Datasets
+  dataset_version_id: '(Insert help text)',
+  demand_version_id: '(Insert help text)',
+  inbound_version_id: '(Insert help text)',
+  inventory_version_id: '(Insert help text)',
+
+  // Fulfillment
+  fulfillment_logic: '(Insert help text)',
+  backorder_probability: '(Insert help text)',
+
+  // Ordering
+  reorder_logic: '(Insert help text)',
+  reorder_resolution: '(Insert help text)',
+  reorder_allocation: '(Insert help text)',
+  order_frequency_days: '(Insert help text)',
+  safety_stock_days: '(Insert help text)',
+  mrq_days: '(Insert help text)',
+  consolidation_mode: '(Insert help text)',
+  min_cube_threshold: '(Insert help text)',
+
+  // Forecasting
+  forecast_method: '(Insert help text)',
+  forecast_bias: '(Insert help text)',
+  forecast_error: '(Insert help text)',
+  forecast_distribution: '(Insert help text)',
+
+  // Entity Sets
+  product_set_id: '(Insert help text)',
+  supply_node_set_id: '(Insert help text)',
+  distribution_node_set_id: '(Insert help text)',
+  demand_node_set_id: '(Insert help text)',
+  edge_set_id: '(Insert help text)',
+
+  // Notes
+  notes: '(Insert help text)',
+}
+
+export default HELP_TEXT

@@ -550,6 +550,22 @@ export function exportScenarioYamlUrl(dbName: string, scenarioId: string): strin
   return `${BASE}/scenarios/${encodeURIComponent(scenarioId)}/export-yaml?db=${encodeURIComponent(dbName)}`;
 }
 
+// Dataset management
+export interface DatasetInfo {
+  dataset_version_id: string;
+  name: string;
+  description: string | null;
+  parent_version_id: string | null;
+  created_at: string | null;
+  created_by: string | null;
+  row_counts: Record<string, number>;
+  scenarios: { scenario_id: string; name: string }[];
+}
+
+export function listDatasets(dbName: string): Promise<DatasetInfo[]> {
+  return fetchJson(`${BASE}/datasets?db=${encodeURIComponent(dbName)}`);
+}
+
 // Org config
 export interface OrgTerminology {
   edge: string;
