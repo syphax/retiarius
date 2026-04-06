@@ -180,6 +180,15 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
         )
     """)
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dataset_version_scope (
+            dataset_version_id TEXT NOT NULL,
+            table_name TEXT NOT NULL,
+            PRIMARY KEY (dataset_version_id, table_name),
+            FOREIGN KEY (dataset_version_id) REFERENCES dataset_version(dataset_version_id)
+        )
+    """)
+
     # --- Network Topology Tables ---
 
     conn.execute("""

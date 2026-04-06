@@ -512,9 +512,17 @@ export interface DatasetVersionInfo {
   description: string | null;
 }
 
+export interface EntitySetInfo {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
 export interface ScenarioConfigResponse {
   scenario: Record<string, unknown>;
   dataset_versions: DatasetVersionInfo[];
+  dataset_versions_by_table: Record<string, DatasetVersionInfo[]>;
+  entity_sets: Record<string, EntitySetInfo[]>;
 }
 
 export function getScenarioConfig(dbName: string, scenarioId: string): Promise<ScenarioConfigResponse> {
@@ -562,7 +570,30 @@ export interface DatasetInfo {
   scenarios: { scenario_id: string; name: string }[];
 }
 
-export function listDatasets(dbName: string): Promise<DatasetInfo[]> {
+export interface TopologyInfo {
+  table: string;
+  label: string;
+  row_count: number;
+}
+
+export interface EntitySetItem {
+  set_type: string;
+  set_table: string;
+  id_column: string;
+  set_id: string;
+  name: string;
+  description: string | null;
+  member_count: number;
+  scenarios: { scenario_id: string; name: string }[];
+}
+
+export interface DatasetsResponse {
+  dataset_versions: DatasetInfo[];
+  topology: TopologyInfo[];
+  entity_sets: EntitySetItem[];
+}
+
+export function listDatasets(dbName: string): Promise<DatasetsResponse> {
   return fetchJson(`${BASE}/datasets?db=${encodeURIComponent(dbName)}`);
 }
 

@@ -6,7 +6,7 @@ import {
   exportScenarioYamlUrl,
   duplicateScenario,
 } from '../api/client'
-import type { DatasetVersionInfo } from '../api/client'
+import type { DatasetVersionInfo, EntitySetInfo } from '../api/client'
 import { useNavigate, useParams } from 'react-router-dom'
 import HELP_TEXT from '../data/helpText'
 
@@ -44,10 +44,18 @@ const GENERAL_FIELDS: FieldDef[] = [
 ]
 
 const DATASET_KEYS = [
-  { key: 'dataset_version_id', label: 'Default Dataset Version' },
-  { key: 'demand_version_id', label: 'Demand (override)' },
-  { key: 'inbound_version_id', label: 'Inbound Schedule (override)' },
-  { key: 'inventory_version_id', label: 'Initial Inventory (override)' },
+  { key: 'dataset_version_id', label: 'Default Dataset Version', table: null },
+  { key: 'demand_version_id', label: 'Demand', table: 'demand' },
+  { key: 'inbound_version_id', label: 'Inbound Schedule', table: 'inbound_schedule' },
+  { key: 'inventory_version_id', label: 'Initial Inventory', table: 'initial_inventory' },
+]
+
+const ENTITY_SET_FIELDS = [
+  { key: 'product_set_id', label: 'Product Set' },
+  { key: 'supply_node_set_id', label: 'Supply Node Set' },
+  { key: 'distribution_node_set_id', label: 'Distribution Node Set' },
+  { key: 'demand_node_set_id', label: 'Demand Node Set' },
+  { key: 'edge_set_id', label: 'Edge Set' },
 ]
 
 // Fulfillment: logic selector on own row, then backorder probability slider
@@ -177,6 +185,8 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
   const undoSnapshot = useRef<Record<string, unknown> | null>(null)
 
   const [datasetVersions, setDatasetVersions] = useState<DatasetVersionInfo[]>([])
+  const [datasetVersionsByTable, setDatasetVersionsByTable] = useState<Record<string, DatasetVersionInfo[]>>({})
+  const [entitySets, setEntitySets] = useState<Record<string, EntitySetInfo[]>>({})
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
 
   // Toast
@@ -202,6 +212,8 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
         setValues(data.scenario)
         setSavedValues(data.scenario)
         setDatasetVersions(data.dataset_versions)
+        setDatasetVersionsByTable(data.dataset_versions_by_table || {})
+        setEntitySets(data.entity_sets || {})
         setLoading(false)
       })
       .catch(err => {
@@ -483,11 +495,16 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
     )
   }
 
-  function renderDatasetField(field: { key: string; label: string }) {
+  function renderDatasetField(field: { key: string; label: string; table: string | null }) {
     const val = values[field.key]
     const modified = isModified(field.key)
     const errMsg = fieldError(field.key)
     const wrapperClass = `config-field${modified ? ' config-field-modified' : ''}${errMsg ? ' config-field-error' : ''}`
+
+    // Use scoped versions for table-specific fields, all versions for default
+    const versions = field.table
+      ? (datasetVersionsByTable[field.table] || datasetVersions)
+      : datasetVersions
 
     return (
       <div key={field.key} className={wrapperClass}>
@@ -498,9 +515,36 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
           disabled={saving}
         >
           <option value="">— default —</option>
-          {datasetVersions.map(dv => (
+          {versions.map(dv => (
             <option key={dv.dataset_version_id} value={dv.dataset_version_id}>
               {dv.name || dv.dataset_version_id}
+            </option>
+          ))}
+        </select>
+        {errMsg && <div className="config-field-msg">{errMsg}</div>}
+      </div>
+    )
+  }
+
+  function renderEntitySetField(field: { key: string; label: string }) {
+    const val = values[field.key]
+    const modified = isModified(field.key)
+    const errMsg = fieldError(field.key)
+    const wrapperClass = `config-field${modified ? ' config-field-modified' : ''}${errMsg ? ' config-field-error' : ''}`
+    const options = entitySets[field.key] || []
+
+    return (
+      <div key={field.key} className={wrapperClass}>
+        <label>{field.label} {helpIcon(field.key)}</label>
+        <select
+          value={String(val ?? '')}
+          onChange={e => updateField(field.key, e.target.value || null)}
+          disabled={saving}
+        >
+          <option value="">(all)</option>
+          {options.map(s => (
+            <option key={s.id} value={s.id}>
+              {s.name || s.id}
             </option>
           ))}
         </select>
@@ -554,6 +598,13 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
         </div>
       </ConfigSection>
 
+      {/* Entity Sets */}
+      <ConfigSection title="Entity Sets" defaultOpen>
+        <div className="config-grid">
+          {ENTITY_SET_FIELDS.map(f => renderEntitySetField(f))}
+        </div>
+      </ConfigSection>
+
       {/* Fulfillment */}
       <ConfigSection title="Fulfillment" defaultOpen>
         <div className="config-grid">
@@ -575,19 +626,6 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
         <div className="config-grid">
           {renderField(FORECAST_METHOD)}
           {forecastActive && FORECAST_PARAMS.map(f => renderField(f))}
-        </div>
-      </ConfigSection>
-
-      {/* Entity Sets */}
-      <ConfigSection title="Entity Sets">
-        <div className="config-grid">
-          {[
-            { key: 'product_set_id', label: 'Product Set' },
-            { key: 'supply_node_set_id', label: 'Supply Node Set' },
-            { key: 'distribution_node_set_id', label: 'Distribution Node Set' },
-            { key: 'demand_node_set_id', label: 'Demand Node Set' },
-            { key: 'edge_set_id', label: 'Edge Set' },
-          ].map(f => renderField({ ...f, type: 'text', placeholder: '(all)' } as FieldDef))}
         </div>
       </ConfigSection>
 

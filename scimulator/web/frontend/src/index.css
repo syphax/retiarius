@@ -829,6 +829,15 @@ select {
   margin-bottom: 12px;
   color: var(--text-h);
 }
+.datasets-subsection {
+  margin-bottom: 20px;
+}
+.datasets-subsection h3 {
+  font-size: 14px;
+  margin-bottom: 8px;
+  color: var(--text);
+  font-weight: 500;
+}
 .text-muted {
   color: var(--text-muted);
 }

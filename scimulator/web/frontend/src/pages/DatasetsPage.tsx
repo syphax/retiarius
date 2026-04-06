@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { listDatasets } from '../api/client'
-import type { DatasetInfo } from '../api/client'
+import type { DatasetInfo, TopologyInfo, EntitySetItem } from '../api/client'
 
 const DATA_TABLES = [
   { key: 'demand', label: 'Demand' },
@@ -12,6 +12,8 @@ const DATA_TABLES = [
 export default function DatasetsPage() {
   const { dbName } = useParams<{ dbName: string }>()
   const [datasets, setDatasets] = useState<DatasetInfo[]>([])
+  const [topology, setTopology] = useState<TopologyInfo[]>([])
+  const [entitySets, setEntitySets] = useState<EntitySetItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -20,7 +22,9 @@ export default function DatasetsPage() {
     setLoading(true)
     listDatasets(dbName)
       .then(data => {
-        setDatasets(data)
+        setDatasets(data.dataset_versions)
+        setTopology(data.topology)
+        setEntitySets(data.entity_sets)
         setLoading(false)
       })
       .catch(err => {
@@ -30,6 +34,12 @@ export default function DatasetsPage() {
   }, [dbName])
 
   if (!dbName) return <div className="error">No database specified.</div>
+
+  // Group entity sets by type
+  const setsByType: Record<string, EntitySetItem[]> = {}
+  for (const s of entitySets) {
+    ;(setsByType[s.set_type] ??= []).push(s)
+  }
 
   return (
     <div className="datasets-page">
@@ -43,15 +53,79 @@ export default function DatasetsPage() {
 
       {loading ? (
         <p>Loading datasets...</p>
-      ) : datasets.length === 0 ? (
-        <p className="empty-state">No dataset versions found in this database.</p>
       ) : (
         <>
+          {/* ── Topology Tables ────────────────────────────────── */}
+          <section className="datasets-section">
+            <h2>Network Topology</h2>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Table</th>
+                  <th>Rows</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topology.map(t => (
+                  <tr key={t.table}>
+                    <td>{t.label}</td>
+                    <td>{t.row_count.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+
+          {/* ── Entity Sets ───────────────────────────────────── */}
+          <section className="datasets-section">
+            <h2>Entity Sets</h2>
+            {Object.keys(setsByType).length === 0 ? (
+              <p className="empty-state">No entity sets defined. All scenarios use the full topology.</p>
+            ) : (
+              Object.entries(setsByType).map(([type, sets]) => (
+                <div key={type} className="datasets-subsection">
+                  <h3>{type}</h3>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Set ID</th>
+                        <th>Name</th>
+                        <th>Members</th>
+                        <th>Used By</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sets.map(s => (
+                        <tr key={s.set_id}>
+                          <td className="scenario-id-col">{s.set_id}</td>
+                          <td>{s.name}</td>
+                          <td>{s.member_count.toLocaleString()}</td>
+                          <td>
+                            {s.scenarios.length === 0
+                              ? <span className="text-muted">—</span>
+                              : s.scenarios.map((sc, i) => (
+                                <span key={sc.scenario_id}>
+                                  {i > 0 && ', '}
+                                  {sc.name}
+                                </span>
+                              ))
+                            }
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))
+            )}
+          </section>
+
+          {/* ── Dataset Versions by Table ─────────────────────── */}
           {DATA_TABLES.map(table => {
             const relevant = datasets.filter(d => (d.row_counts[table.key] ?? 0) > 0)
             return (
               <section key={table.key} className="datasets-section">
-                <h2>{table.label}</h2>
+                <h2>{table.label} Data</h2>
                 {relevant.length === 0 ? (
                   <p className="empty-state">No datasets with {table.label.toLowerCase()} data.</p>
                 ) : (
@@ -94,7 +168,7 @@ export default function DatasetsPage() {
             )
           })}
 
-          {/* Summary: all datasets */}
+          {/* ── All Dataset Versions Summary ──────────────────── */}
           <section className="datasets-section">
             <h2>All Dataset Versions</h2>
             <table className="data-table">

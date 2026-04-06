@@ -810,7 +810,7 @@ async def get_scenario_config(scenario_id: str, db: str, request: Request):
             else:
                 scenario[k] = str(v)
 
-        # Get available dataset versions
+        # Get available dataset versions with scope info
         versions = conn.execute(
             "SELECT dataset_version_id, name, description FROM dataset_version ORDER BY name"
         ).fetchall()
@@ -819,9 +819,71 @@ async def get_scenario_config(scenario_id: str, db: str, request: Request):
             for v in versions
         ]
 
+        # Build per-table version lists using hybrid approach:
+        # A version appears for a table if it has rows there, or is explicitly scoped, or is universal (no scopes)
+        scoped = {}
+        try:
+            scope_rows = conn.execute(
+                "SELECT dataset_version_id, table_name FROM dataset_version_scope"
+            ).fetchall()
+            for vid, tbl in scope_rows:
+                scoped.setdefault(vid, set()).add(tbl)
+        except Exception:
+            pass  # table may not exist in older DBs
+
+        data_tables = ['demand', 'inbound_schedule', 'initial_inventory']
+        # Check which versions have actual rows in each table
+        has_data: dict[str, set[str]] = {tbl: set() for tbl in data_tables}
+        for tbl in data_tables:
+            try:
+                rows = conn.execute(
+                    f"SELECT DISTINCT dataset_version_id FROM {tbl}"
+                ).fetchall()
+                has_data[tbl] = {r[0] for r in rows}
+            except Exception:
+                pass
+
+        # For each table, a version qualifies if:
+        # 1. It has rows in that table, OR
+        # 2. It is explicitly scoped to that table, OR
+        # 3. It has no scope entries (universal)
+        versions_by_table: dict[str, list] = {}
+        for tbl in data_tables:
+            qualified = []
+            for v in dataset_versions:
+                vid = v['dataset_version_id']
+                is_universal = vid not in scoped
+                is_scoped_here = vid in scoped and tbl in scoped[vid]
+                has_rows = vid in has_data.get(tbl, set())
+                if is_universal or is_scoped_here or has_rows:
+                    qualified.append(v)
+            versions_by_table[tbl] = qualified
+
+        # Get available entity sets
+        entity_sets: dict[str, list] = {}
+        for set_table, id_col in [
+            ('product_set', 'product_set_id'),
+            ('supply_node_set', 'supply_node_set_id'),
+            ('distribution_node_set', 'distribution_node_set_id'),
+            ('demand_node_set', 'demand_node_set_id'),
+            ('edge_set', 'edge_set_id'),
+        ]:
+            try:
+                rows = conn.execute(
+                    f"SELECT {id_col}, name, description FROM {set_table} ORDER BY name"
+                ).fetchall()
+                entity_sets[id_col] = [
+                    {"id": r[0], "name": r[1], "description": r[2]}
+                    for r in rows
+                ]
+            except Exception:
+                entity_sets[id_col] = []
+
         return {
             "scenario": scenario,
             "dataset_versions": dataset_versions,
+            "dataset_versions_by_table": versions_by_table,
+            "entity_sets": entity_sets,
         }
     finally:
         conn.close()
@@ -934,15 +996,17 @@ async def export_scenario_yaml(scenario_id: str, db: str, request: Request):
 
 @router.get("/datasets")
 async def list_datasets(db: str, request: Request):
-    """List all dataset versions with row counts per data table.
+    """List all dataset versions with row counts, plus topology tables and entity sets.
 
-    Returns dataset versions with counts for demand, inbound_schedule,
-    and initial_inventory tables.
+    Returns:
+    - dataset_versions: versions with per-table row counts and scenario usage
+    - topology: row counts for topology tables (product, supply_node, etc.)
+    - entity_sets: entity sets with member counts and scenario usage
     """
     db_path = _resolve_db(db, request)
     conn = get_connection(db_path, read_only=True)
     try:
-        # Get all dataset versions
+        # ── Dataset versions ──────────────────────────────────────
         versions = conn.execute("""
             SELECT dataset_version_id, name, description, parent_version_id,
                    created_at, created_by
@@ -950,8 +1014,7 @@ async def list_datasets(db: str, request: Request):
             ORDER BY name
         """).fetchall()
 
-        # For each version, count rows in each data table
-        result = []
+        dataset_versions = []
         for v in versions:
             vid = v[0]
             counts: dict[str, int] = {}
@@ -966,7 +1029,6 @@ async def list_datasets(db: str, request: Request):
                 except Exception:
                     counts[table] = 0
 
-            # Which scenarios use this version (as default or override)
             scenario_rows = conn.execute("""
                 SELECT scenario_id, name FROM scenario
                 WHERE dataset_version_id = ?
@@ -975,7 +1037,7 @@ async def list_datasets(db: str, request: Request):
                    OR inventory_version_id = ?
             """, [vid, vid, vid, vid]).fetchall()
 
-            result.append({
+            dataset_versions.append({
                 'dataset_version_id': vid,
                 'name': v[1],
                 'description': v[2],
@@ -989,7 +1051,78 @@ async def list_datasets(db: str, request: Request):
                 ],
             })
 
-        return result
+        # ── Topology tables ───────────────────────────────────────
+        topology_tables = [
+            ('product', 'Products'),
+            ('supply_node', 'Supply Nodes'),
+            ('distribution_node', 'Distribution Nodes'),
+            ('demand_node', 'Demand Nodes'),
+            ('customer', 'Customers'),
+            ('edge', 'Edges'),
+        ]
+        topology: list[dict] = []
+        for table, label in topology_tables:
+            try:
+                count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            except Exception:
+                count = 0
+            topology.append({
+                'table': table,
+                'label': label,
+                'row_count': count,
+            })
+
+        # ── Entity sets with member counts and scenario usage ─────
+        set_configs = [
+            ('product_set', 'product_set_id', 'product_set_member', 'Products'),
+            ('supply_node_set', 'supply_node_set_id', 'supply_node_set_member', 'Supply Nodes'),
+            ('distribution_node_set', 'distribution_node_set_id', 'distribution_node_set_member', 'Distribution Nodes'),
+            ('demand_node_set', 'demand_node_set_id', 'demand_node_set_member', 'Demand Nodes'),
+            ('edge_set', 'edge_set_id', 'edge_set_member', 'Edges'),
+        ]
+        entity_sets: list[dict] = []
+        for set_table, id_col, member_table, label in set_configs:
+            try:
+                rows = conn.execute(f"""
+                    SELECT s.{id_col}, s.name, s.description,
+                           (SELECT COUNT(*) FROM {member_table} m
+                            WHERE m.{id_col} = s.{id_col}) as member_count
+                    FROM {set_table} s
+                    ORDER BY s.name
+                """).fetchall()
+            except Exception:
+                rows = []
+
+            for r in rows:
+                set_id = r[0]
+                # Find scenarios using this entity set
+                try:
+                    scenario_rows = conn.execute(
+                        f"SELECT scenario_id, name FROM scenario WHERE {id_col} = ?",
+                        [set_id],
+                    ).fetchall()
+                except Exception:
+                    scenario_rows = []
+
+                entity_sets.append({
+                    'set_type': label,
+                    'set_table': set_table,
+                    'id_column': id_col,
+                    'set_id': set_id,
+                    'name': r[1],
+                    'description': r[2],
+                    'member_count': r[3],
+                    'scenarios': [
+                        {'scenario_id': s[0], 'name': s[1]}
+                        for s in scenario_rows
+                    ],
+                })
+
+        return {
+            'dataset_versions': dataset_versions,
+            'topology': topology,
+            'entity_sets': entity_sets,
+        }
     finally:
         conn.close()
 
