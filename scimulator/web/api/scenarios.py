@@ -1128,6 +1128,147 @@ async def list_datasets(db: str, request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Entity set management
+# ---------------------------------------------------------------------------
+
+# Mapping from set_table to (id_col, member_table, member_id_col, source_table, source_id_col, label)
+ENTITY_SET_CONFIGS: dict[str, tuple[str, str, str, str, str, str]] = {
+    'product_set': ('product_set_id', 'product_set_member', 'product_id', 'product', 'product_id', 'Products'),
+    'supply_node_set': ('supply_node_set_id', 'supply_node_set_member', 'supply_node_id', 'supply_node', 'supply_node_id', 'Supply Nodes'),
+    'distribution_node_set': ('distribution_node_set_id', 'distribution_node_set_member', 'dist_node_id', 'distribution_node', 'dist_node_id', 'Distribution Nodes'),
+    'demand_node_set': ('demand_node_set_id', 'demand_node_set_member', 'demand_node_id', 'demand_node', 'demand_node_id', 'Demand Nodes'),
+    'edge_set': ('edge_set_id', 'edge_set_member', 'edge_id', 'edge', 'edge_id', 'Edges'),
+}
+
+# Which columns to show for each source table (id + display columns)
+ENTITY_TABLE_COLUMNS: dict[str, list[str]] = {
+    'product': ['product_id', 'name', 'standard_cost', 'base_price', 'weight', 'weight_uom', 'cube', 'cube_uom'],
+    'supply_node': ['supply_node_id', 'supplier_id', 'name', 'latitude', 'longitude'],
+    'distribution_node': ['dist_node_id', 'name', 'latitude', 'longitude', 'zip3'],
+    'demand_node': ['demand_node_id', 'name', 'latitude', 'longitude', 'zip3'],
+    'edge': ['edge_id', 'origin_node_id', 'origin_node_type', 'dest_node_id', 'dest_node_type', 'transport_type'],
+}
+
+
+@router.get("/entity-sets/tables")
+async def list_entity_set_tables(db: str, request: Request):
+    """List the entity tables that support entity sets, with row counts."""
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        tables = []
+        for set_table, (id_col, member_table, member_id_col, source_table, source_id_col, label) in ENTITY_SET_CONFIGS.items():
+            try:
+                count = conn.execute(f"SELECT COUNT(*) FROM {source_table}").fetchone()[0]
+            except Exception:
+                count = 0
+            tables.append({
+                'set_table': set_table,
+                'source_table': source_table,
+                'label': label,
+                'id_column': id_col,
+                'member_id_column': member_id_col,
+                'row_count': count,
+                'columns': ENTITY_TABLE_COLUMNS.get(source_table, [source_id_col]),
+            })
+        return {'tables': tables}
+    finally:
+        conn.close()
+
+
+@router.get("/entity-sets/items")
+async def list_entity_items(db: str, set_table: str, request: Request):
+    """List all items from the source table for a given entity set type."""
+    db_path = _resolve_db(db, request)
+    if set_table not in ENTITY_SET_CONFIGS:
+        raise HTTPException(400, f"Unknown set table: {set_table}")
+    id_col, member_table, member_id_col, source_table, source_id_col, label = ENTITY_SET_CONFIGS[set_table]
+    columns = ENTITY_TABLE_COLUMNS.get(source_table, [source_id_col])
+
+    conn = get_connection(db_path, read_only=True)
+    try:
+        rows = conn.execute(
+            f"SELECT {', '.join(columns)} FROM {source_table} ORDER BY {columns[0]}"
+        ).fetchall()
+        return {
+            'columns': columns,
+            'rows': [dict(zip(columns, [str(v) if v is not None else None for v in row])) for row in rows],
+        }
+    finally:
+        conn.close()
+
+
+class CreateEntitySetRequest(BaseModel):
+    set_table: str
+    name: str
+    description: str = ''
+    member_ids: list[str]
+
+
+@router.post("/entity-sets")
+async def create_entity_set(db: str, body: CreateEntitySetRequest, request: Request):
+    """Create a new entity set with the given members."""
+    db_path = _resolve_db(db, request)
+    if body.set_table not in ENTITY_SET_CONFIGS:
+        raise HTTPException(400, f"Unknown set table: {body.set_table}")
+    if not body.name.strip():
+        raise HTTPException(400, "Name is required")
+    if not body.member_ids:
+        raise HTTPException(400, "At least one member is required")
+
+    id_col, member_table, member_id_col, source_table, source_id_col, label = ENTITY_SET_CONFIGS[body.set_table]
+
+    conn = get_connection(db_path)
+    try:
+        # Generate unique ID using word pool
+        existing = {r[0] for r in conn.execute(f"SELECT {id_col} FROM {body.set_table}").fetchall()}
+        set_id = generate_scenario_id(existing)
+
+        conn.execute(
+            f"INSERT INTO {body.set_table} ({id_col}, name, description) VALUES (?, ?, ?)",
+            [set_id, body.name.strip(), body.description.strip() or None],
+        )
+        for mid in body.member_ids:
+            conn.execute(
+                f"INSERT INTO {member_table} ({id_col}, {member_id_col}) VALUES (?, ?)",
+                [set_id, mid],
+            )
+        return {'set_id': set_id, 'name': body.name.strip(), 'member_count': len(body.member_ids)}
+    finally:
+        conn.close()
+
+
+@router.delete("/entity-sets")
+async def delete_entity_set(db: str, set_table: str, set_id: str, request: Request):
+    """Delete an entity set, unless it is used by any scenario."""
+    db_path = _resolve_db(db, request)
+    if set_table not in ENTITY_SET_CONFIGS:
+        raise HTTPException(400, f"Unknown set table: {set_table}")
+
+    id_col, member_table, member_id_col, source_table, source_id_col, label = ENTITY_SET_CONFIGS[set_table]
+
+    conn = get_connection(db_path)
+    try:
+        # Check if any scenario references this set (including archived)
+        scenario_rows = conn.execute(
+            f"SELECT scenario_id, name FROM scenario WHERE {id_col} = ?",
+            [set_id],
+        ).fetchall()
+        if scenario_rows:
+            names = ', '.join(r[1] for r in scenario_rows)
+            raise HTTPException(
+                409,
+                f"Cannot delete: entity set is used by scenario(s): {names}",
+            )
+
+        conn.execute(f"DELETE FROM {member_table} WHERE {id_col} = ?", [set_id])
+        conn.execute(f"DELETE FROM {set_table} WHERE {id_col} = ?", [set_id])
+        return {'status': 'deleted', 'set_id': set_id}
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

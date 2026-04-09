@@ -49,6 +49,12 @@ def _migrate(conn: duckdb.DuckDBPyConnection):
 
     # v0.4: Phase 3 ordering & routing columns on scenario
     if scen_cols:
+        # v0.4.3: rename reorder_scope → reorder_resolution (must precede add-column loop)
+        if 'reorder_scope' in scen_cols and 'reorder_resolution' not in scen_cols:
+            conn.execute("ALTER TABLE scenario RENAME COLUMN reorder_scope TO reorder_resolution")
+            scen_cols.discard('reorder_scope')
+            scen_cols.add('reorder_resolution')
+
         phase3_cols = {
             'fulfillment_logic': "TEXT DEFAULT 'closest_node_wins'",
             'reorder_logic': 'TEXT',
@@ -67,10 +73,6 @@ def _migrate(conn: duckdb.DuckDBPyConnection):
         for col, col_type in phase3_cols.items():
             if col not in scen_cols:
                 conn.execute(f"ALTER TABLE scenario ADD COLUMN {col} {col_type}")
-
-        # v0.4.3: rename reorder_scope → reorder_resolution
-        if 'reorder_scope' in scen_cols and 'reorder_resolution' not in scen_cols:
-            conn.execute("ALTER TABLE scenario RENAME COLUMN reorder_scope TO reorder_resolution")
 
     # v0.4: fulfillment_rank and optimal_cost on event_log
     if cols:  # cols = event_log columns from above

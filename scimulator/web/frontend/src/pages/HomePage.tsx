@@ -152,46 +152,48 @@ export default function HomePage() {
                     {s.name}
                   </Link>
                 </td>
-                <td>{s.start_date} to {s.end_date}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{s.start_date} to {s.end_date}</td>
                 <td>
                   <span className={`status-badge status-${s.status || 'none'}`}>
                     {s.status || 'not run'}
                   </span>
                 </td>
-                <td>{formatTimestamp(s.last_run_at)}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{formatTimestamp(s.last_run_at)}</td>
                 <td>{formatTimestamp(s.updated_at)}</td>
                 <td>{s.wall_clock_seconds != null ? `${s.wall_clock_seconds}s` : '-'}</td>
                 <td className="row-actions">
-                  <button
-                    className="icon-btn"
-                    title="Configure scenario"
-                    onClick={() => navigate(`/scenario/${dbName}/${encodeURIComponent(s.scenario_id)}?tab=configure`)}
-                  >
-                    {'\u2699'}
-                  </button>
-                  <button
-                    className="icon-btn"
-                    title="Run scenario"
-                    disabled={actionInProgress === s.scenario_id}
-                    onClick={() => handleRun(s.scenario_id)}
-                  >
-                    {actionInProgress === s.scenario_id ? '...' : '\u25B6'}
-                  </button>
-                  <button
-                    className="icon-btn"
-                    title="Duplicate scenario"
-                    disabled={actionInProgress === `dup-${s.scenario_id}`}
-                    onClick={() => handleDuplicate(s.scenario_id)}
-                  >
-                    {'\u2398'}
-                  </button>
-                  <button
-                    className="icon-btn icon-btn-danger"
-                    title="Archive scenario"
-                    onClick={() => handleArchive(s.scenario_id, s.name)}
-                  >
-                    {'\u2715'}
-                  </button>
+                  <div className="row-actions-inner">
+                    <button
+                      className="icon-btn"
+                      title="Configure scenario"
+                      onClick={() => navigate(`/scenario/${dbName}/${encodeURIComponent(s.scenario_id)}?tab=configure`)}
+                    >
+                      {'\u2699'}
+                    </button>
+                    <button
+                      className="icon-btn"
+                      title="Run scenario"
+                      disabled={actionInProgress === s.scenario_id}
+                      onClick={() => handleRun(s.scenario_id)}
+                    >
+                      {actionInProgress === s.scenario_id ? '...' : '\u25B6'}
+                    </button>
+                    <button
+                      className="icon-btn"
+                      title="Duplicate scenario"
+                      disabled={actionInProgress === `dup-${s.scenario_id}`}
+                      onClick={() => handleDuplicate(s.scenario_id)}
+                    >
+                      {'\u2398'}
+                    </button>
+                    <button
+                      className="icon-btn icon-btn-danger"
+                      title="Archive scenario"
+                      onClick={() => handleArchive(s.scenario_id, s.name)}
+                    >
+                      {'\u2715'}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

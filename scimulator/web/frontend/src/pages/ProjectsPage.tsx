@@ -147,28 +147,30 @@ export default function ProjectsPage() {
                 <td>{p.scenario_count}</td>
                 <td>{formatTimestamp(p.updated_at)}</td>
                 <td className="row-actions">
-                  <button
-                    className="icon-btn"
-                    title="Edit project"
-                    onClick={() => startEditing(p)}
-                  >
-                    {'\u270E'}
-                  </button>
-                  <button
-                    className="icon-btn"
-                    title="Duplicate project"
-                    disabled={actionInProgress === `clone-${p.project_id}`}
-                    onClick={() => handleClone(p.project_id, p.name)}
-                  >
-                    {'\u2398'}
-                  </button>
-                  <button
-                    className="icon-btn icon-btn-danger"
-                    title="Archive project"
-                    onClick={() => handleArchive(p.project_id, p.name)}
-                  >
-                    {'\u2715'}
-                  </button>
+                  <div className="row-actions-inner">
+                    <button
+                      className="icon-btn"
+                      title="Edit project"
+                      onClick={() => startEditing(p)}
+                    >
+                      {'\u270E'}
+                    </button>
+                    <button
+                      className="icon-btn"
+                      title="Duplicate project"
+                      disabled={actionInProgress === `clone-${p.project_id}`}
+                      onClick={() => handleClone(p.project_id, p.name)}
+                    >
+                      {'\u2398'}
+                    </button>
+                    <button
+                      className="icon-btn icon-btn-danger"
+                      title="Archive project"
+                      onClick={() => handleArchive(p.project_id, p.name)}
+                    >
+                      {'\u2715'}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

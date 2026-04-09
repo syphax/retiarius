@@ -597,6 +597,50 @@ export function listDatasets(dbName: string): Promise<DatasetsResponse> {
   return fetchJson(`${BASE}/datasets?db=${encodeURIComponent(dbName)}`);
 }
 
+// Entity set management
+export interface EntitySetTableInfo {
+  set_table: string;
+  source_table: string;
+  label: string;
+  id_column: string;
+  member_id_column: string;
+  row_count: number;
+  columns: string[];
+}
+
+export function listEntitySetTables(dbName: string): Promise<{ tables: EntitySetTableInfo[] }> {
+  return fetchJson(`${BASE}/entity-sets/tables?db=${encodeURIComponent(dbName)}`);
+}
+
+export function listEntityItems(dbName: string, setTable: string): Promise<{ columns: string[]; rows: Record<string, string | null>[] }> {
+  return fetchJson(`${BASE}/entity-sets/items?db=${encodeURIComponent(dbName)}&set_table=${encodeURIComponent(setTable)}`);
+}
+
+export function createEntitySet(
+  dbName: string,
+  setTable: string,
+  name: string,
+  description: string,
+  memberIds: string[],
+): Promise<{ set_id: string; name: string; member_count: number }> {
+  return fetchJson(`${BASE}/entity-sets?db=${encodeURIComponent(dbName)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ set_table: setTable, name, description, member_ids: memberIds }),
+  });
+}
+
+export function deleteEntitySet(
+  dbName: string,
+  setTable: string,
+  setId: string,
+): Promise<{ status: string; set_id: string }> {
+  return fetchJson(
+    `${BASE}/entity-sets?db=${encodeURIComponent(dbName)}&set_table=${encodeURIComponent(setTable)}&set_id=${encodeURIComponent(setId)}`,
+    { method: 'DELETE' },
+  );
+}
+
 // Org config
 export interface OrgTerminology {
   edge: string;

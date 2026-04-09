@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { listDatasets } from '../api/client'
+import { listDatasets, deleteEntitySet } from '../api/client'
 import type { DatasetInfo, TopologyInfo, EntitySetItem } from '../api/client'
 
 const DATA_TABLES = [
@@ -17,7 +17,7 @@ export default function DatasetsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  function refresh() {
     if (!dbName) return
     setLoading(true)
     listDatasets(dbName)
@@ -31,7 +31,21 @@ export default function DatasetsPage() {
         setError(err.message)
         setLoading(false)
       })
-  }, [dbName])
+  }
+
+  useEffect(() => { refresh() }, [dbName])
+
+  async function handleDeleteSet(s: EntitySetItem) {
+    if (!dbName) return
+    if (!confirm(`Delete entity set "${s.name}"?`)) return
+    setError(null)
+    try {
+      await deleteEntitySet(dbName, s.set_table, s.set_id)
+      refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   if (!dbName) return <div className="error">No database specified.</div>
 
@@ -79,6 +93,9 @@ export default function DatasetsPage() {
           {/* ── Entity Sets ───────────────────────────────────── */}
           <section className="datasets-section">
             <h2>Entity Sets</h2>
+            <p>
+              <Link to={`/datasets/${dbName}/entity-sets/create`}>+ Create new entity set</Link>
+            </p>
             {Object.keys(setsByType).length === 0 ? (
               <p className="empty-state">No entity sets defined. All scenarios use the full topology.</p>
             ) : (
@@ -92,6 +109,7 @@ export default function DatasetsPage() {
                         <th>Name</th>
                         <th>Members</th>
                         <th>Used By</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -110,6 +128,18 @@ export default function DatasetsPage() {
                                 </span>
                               ))
                             }
+                          </td>
+                          <td className="row-actions">
+                            <div className="row-actions-inner">
+                              <button
+                                className="icon-btn icon-btn-danger"
+                                title={s.scenarios.length > 0 ? 'Cannot delete: used by scenario(s)' : 'Delete entity set'}
+                                disabled={s.scenarios.length > 0}
+                                onClick={() => handleDeleteSet(s)}
+                              >
+                                {'\u2715'}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
