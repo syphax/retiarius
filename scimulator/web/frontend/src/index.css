@@ -846,6 +846,96 @@ select {
   color: var(--text-muted);
 }
 
+/* Sortable table headers */
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+}
+.sortable-th:hover {
+  color: var(--text-h);
+}
+
+/* Tag pills */
+.tags-cell {
+  cursor: pointer;
+  min-width: 80px;
+}
+.tags-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 8px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.tag-pill-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 0 0 2px;
+}
+.tag-pill-remove:hover {
+  color: var(--danger);
+}
+.tags-editor {
+  min-width: 120px;
+}
+.tag-inline-input {
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 12px;
+  min-width: 60px;
+  width: 60px;
+  padding: 2px 0;
+}
+
+/* Tag filter bar */
+.tag-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.tag-filter-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+.tag-filter-btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tag-filter-btn:hover {
+  color: var(--text-h);
+  border-color: var(--text-muted);
+}
+.tag-filter-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
 /* Entity set create page */
 .form-row {
   display: flex;

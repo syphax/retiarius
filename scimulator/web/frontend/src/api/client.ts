@@ -71,6 +71,7 @@ export interface RegistryScenarioSummary {
   run_wall_clock_seconds: number | null;
   created_at: string;
   updated_at: string;
+  tags: string;
 }
 
 export function listRegistryScenarios(projectId: string): Promise<RegistryScenarioSummary[]> {
@@ -151,7 +152,7 @@ export function duplicateScenario(
 export function updateRegistryScenario(
   projectId: string,
   scenarioId: string,
-  fields: { name?: string; description?: string },
+  fields: { name?: string; description?: string; tags?: string },
 ): Promise<RegistryScenarioSummary> {
   return fetchJson(
     `${BASE}/registry/projects/${encodeURIComponent(projectId)}/scenarios/${encodeURIComponent(scenarioId)}`,

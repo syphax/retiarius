@@ -117,10 +117,19 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
             notes TEXT DEFAULT '',
+            tags TEXT DEFAULT '',
 
             PRIMARY KEY (scenario_id, project_id, org_id)
         )
     """)
+
+    # Migrate: add tags column if missing
+    sc_cols = {r[0] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'scenario_config'"
+    ).fetchall()}
+    if sc_cols and 'tags' not in sc_cols:
+        conn.execute("ALTER TABLE scenario_config ADD COLUMN tags TEXT DEFAULT ''")
 
     # Seed defaults
     conn.execute("""
@@ -327,7 +336,7 @@ def list_scenarios(
         SELECT scenario_id, project_id, name, description,
                start_date, end_date, currency_code, time_resolution,
                backorder_probability, status, last_run_at,
-               run_wall_clock_seconds, created_at, updated_at
+               run_wall_clock_seconds, created_at, updated_at, tags
         FROM scenario_config
         WHERE project_id = ? AND org_id = ?
     """
@@ -339,7 +348,7 @@ def list_scenarios(
     cols = ['scenario_id', 'project_id', 'name', 'description',
             'start_date', 'end_date', 'currency_code', 'time_resolution',
             'backorder_probability', 'status', 'last_run_at',
-            'run_wall_clock_seconds', 'created_at', 'updated_at']
+            'run_wall_clock_seconds', 'created_at', 'updated_at', 'tags']
 
     return [_row_to_dict(cols, r) for r in rows]
 

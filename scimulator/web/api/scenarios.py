@@ -351,6 +351,7 @@ class ScenarioUpdate(BaseModel):
     time_resolution: Optional[str] = None
     backorder_probability: Optional[float] = None
     notes: Optional[str] = None
+    tags: Optional[str] = None
 
 
 @router.put("/registry/projects/{project_id}/scenarios/{scenario_id}")
