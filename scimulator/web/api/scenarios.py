@@ -1277,6 +1277,8 @@ def _resolve_db(db_name: str, request: Request) -> str:
     """Resolve a database name to a full path, checking it exists."""
     data_dir = request.app.state.data_dir
     db_path = data_dir / db_name
+    if not db_path.exists() and not db_name.endswith('.duckdb'):
+        db_path = data_dir / f"{db_name}.duckdb"
     if not db_path.exists():
         raise HTTPException(404, f"Database not found: {db_name}")
     return str(db_path)

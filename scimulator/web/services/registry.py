@@ -421,6 +421,12 @@ def save_scenario(
             list(all_fields.values()),
         )
 
+    # Touch project updated_at so the project page shows recent activity
+    conn.execute(
+        "UPDATE project SET updated_at = ? WHERE project_id = ? AND org_id = ?",
+        [now, project_id, org_id],
+    )
+
     return get_scenario(conn, scenario_id, project_id, org_id)
 
 

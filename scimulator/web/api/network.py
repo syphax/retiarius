@@ -114,6 +114,8 @@ async def get_products(db_name: str, request: Request):
 
 def _resolve_db(db_name: str, request: Request) -> str:
     db_path = request.app.state.data_dir / db_name
+    if not db_path.exists() and not db_name.endswith('.duckdb'):
+        db_path = request.app.state.data_dir / f"{db_name}.duckdb"
     if not db_path.exists():
         raise HTTPException(404, f"Database not found: {db_name}")
     return str(db_path)

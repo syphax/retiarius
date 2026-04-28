@@ -572,11 +572,10 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
         <button className="config-btn" onClick={handleDiscard} disabled={saving || !hasAnyChanges}>
           Discard Changes
         </button>
+        <button className="config-btn" onClick={handleDuplicate} disabled={saving}>Duplicate</button>
         <a className="config-btn" href={exportScenarioYamlUrl(dbName, scenarioId)} download>
           Export YAML
         </a>
-        <span className="config-actions-sep" />
-        <button className="config-btn" onClick={handleDuplicate} disabled={saving}>Duplicate</button>
       </div>
 
       {error && <div className="error" style={{ marginTop: 12 }}>Error: {error}</div>}

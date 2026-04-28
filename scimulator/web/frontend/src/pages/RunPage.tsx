@@ -25,7 +25,7 @@ export default function RunPage() {
         dbName || undefined,
         replace,
       )
-      navigate(`/scenario/${result.database}/${result.scenario_id}`)
+      navigate(`/scenario/${result.database.replace(/\.duckdb$/, '')}/${result.scenario_id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setRunning(false)

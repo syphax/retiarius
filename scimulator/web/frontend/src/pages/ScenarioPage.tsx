@@ -131,7 +131,7 @@ export default function ScenarioPage() {
   const [editName, setEditName] = useState('')
   const [editDesc, setEditDesc] = useState('')
 
-  const projectId = dbName?.replace(/\.duckdb$/, '') || ''
+  const projectId = dbName || ''
   const [overviewKpis, setOverviewKpis] = useState<{ avg_inventory_value: number; months_of_supply: number } | null>(null)
   const [registryStatus, setRegistryStatus] = useState<string | null>(null)
 
@@ -143,7 +143,7 @@ export default function ScenarioPage() {
     // Results may not exist (draft/modified scenarios), so handle gracefully
     Promise.all([
       getResultsSummary(dbName, scenarioId).catch(() => null),
-      getRegistryScenario(dbName.replace(/\.duckdb$/, ''), scenarioId).catch(() => null),
+      getRegistryScenario(dbName, scenarioId).catch(() => null),
       getInventoryKpis(dbName, scenarioId).catch(() => null),
     ])
       .then(([results, regScenario, invKpiData]) => {

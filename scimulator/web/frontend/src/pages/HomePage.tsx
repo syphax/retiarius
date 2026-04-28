@@ -34,11 +34,12 @@ type MergedScenario = {
   run_started_at: string | null
   run_completed_at: string | null
   last_run_at: string | null
+  created_at: string | null
   updated_at: string | null
   tags: string
 }
 
-type SortKey = 'scenario_id' | 'name' | 'period' | 'status' | 'tags' | 'last_run_at' | 'updated_at' | 'wall_clock_seconds'
+type SortKey = 'scenario_id' | 'name' | 'period' | 'status' | 'tags' | 'last_run_at' | 'created_at' | 'updated_at' | 'wall_clock_seconds'
 
 export default function HomePage() {
   const navigate = useNavigate()
@@ -169,7 +170,9 @@ export default function HomePage() {
         const reg = registryScenarios.find(r => r.scenario_id === s.scenario_id)
         return {
           ...s,
+          status: reg?.status || s.status,
           last_run_at: reg?.last_run_at || s.run_completed_at,
+          created_at: reg?.created_at || null,
           updated_at: reg?.updated_at || null,
           tags: reg?.tags || '',
         }
@@ -191,6 +194,7 @@ export default function HomePage() {
         run_started_at: null as string | null,
         run_completed_at: null as string | null,
         last_run_at: r.last_run_at,
+        created_at: r.created_at,
         updated_at: r.updated_at,
         tags: r.tags || '',
       })),
@@ -223,6 +227,7 @@ export default function HomePage() {
         case 'status': va = a.status || ''; vb = b.status || ''; break
         case 'tags': va = a.tags; vb = b.tags; break
         case 'last_run_at': va = a.last_run_at || ''; vb = b.last_run_at || ''; break
+        case 'created_at': va = a.created_at || ''; vb = b.created_at || ''; break
         case 'updated_at': va = a.updated_at || ''; vb = b.updated_at || ''; break
         case 'wall_clock_seconds': va = a.wall_clock_seconds; vb = b.wall_clock_seconds; break
         default: return 0
@@ -292,6 +297,7 @@ export default function HomePage() {
               <th className="sortable-th" onClick={() => handleSort('status')}>Status{sortIndicator('status')}</th>
               <th className="sortable-th" onClick={() => handleSort('tags')}>Tags{sortIndicator('tags')}</th>
               <th className="sortable-th" onClick={() => handleSort('last_run_at')}>Last Run{sortIndicator('last_run_at')}</th>
+              <th className="sortable-th" onClick={() => handleSort('created_at')}>Created{sortIndicator('created_at')}</th>
               <th className="sortable-th" onClick={() => handleSort('updated_at')}>Last Modified{sortIndicator('updated_at')}</th>
               <th className="sortable-th" onClick={() => handleSort('wall_clock_seconds')}>Runtime{sortIndicator('wall_clock_seconds')}</th>
               <th></th>
@@ -356,6 +362,7 @@ export default function HomePage() {
                   )}
                 </td>
                 <td style={{ whiteSpace: 'nowrap' }}>{formatTimestamp(s.last_run_at)}</td>
+                <td>{formatTimestamp(s.created_at)}</td>
                 <td>{formatTimestamp(s.updated_at)}</td>
                 <td>{s.wall_clock_seconds != null ? `${s.wall_clock_seconds}s` : '-'}</td>
                 <td className="row-actions">

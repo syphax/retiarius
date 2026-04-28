@@ -135,7 +135,7 @@ export default function ProjectsPage() {
                     </>
                   ) : (
                     <>
-                      <Link to={`/project/${p.database}/${p.project_id}`}>
+                      <Link to={`/project/${p.database.replace(/\.duckdb$/, '')}/${p.project_id}`}>
                         <strong>{p.name}</strong>
                       </Link>
                       {p.description && (

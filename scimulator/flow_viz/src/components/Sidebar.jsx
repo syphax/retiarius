@@ -102,7 +102,7 @@ export function Sidebar({ params, onChange, onRecalculate, dirty }) {
             onClick={onRecalculate}
             disabled={!dirty}
           >
-            Recalculate
+            Update
           </button>
         </div>
       )}

@@ -7,7 +7,7 @@ export default function Layout() {
         <Link to="/" className="app-logo">SCimulator</Link>
         <nav>
           <Link to="/">Projects</Link>
-          <Link to="/run">Run Simulation</Link>
+          <Link to="/help">Help</Link>
         </nav>
       </header>
       <main className="app-main">
