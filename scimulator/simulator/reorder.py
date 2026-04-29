@@ -256,6 +256,12 @@ class PeriodicReorderPolicy:
             if order_qty <= 0:
                 continue
 
+            # Round to integer (ceil if 0 < qty < 1, else normal rounding)
+            if 0 < order_qty < 1:
+                order_qty = 1
+            else:
+                order_qty = round(order_qty)
+
             # Expected arrival = sim_date + N
             expected_arrival = sim_date + timedelta(days=int(math.ceil(n_days)))
 

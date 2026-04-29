@@ -568,11 +568,11 @@ export default function ScenarioConfigForm({ dbName, scenarioId, projectId, onSt
         <button className="btn-primary" onClick={handleSave} disabled={saving || !hasAnyChanges}>
           {saving ? 'Saving...' : 'Save'}
         </button>
-        <button className="config-btn" onClick={handleSaveAs} disabled={saving}>Save As...</button>
+        <button className="config-btn" onClick={handleSaveAs} disabled={saving} title="Save current edits as a new scenario">Save As...</button>
         <button className="config-btn" onClick={handleDiscard} disabled={saving || !hasAnyChanges}>
           Discard Changes
         </button>
-        <button className="config-btn" onClick={handleDuplicate} disabled={saving}>Duplicate</button>
+        <button className="config-btn" onClick={handleDuplicate} disabled={saving} title="Clone the saved scenario (including results) as a new scenario">Duplicate</button>
         <a className="config-btn" href={exportScenarioYamlUrl(dbName, scenarioId)} download>
           Export YAML
         </a>

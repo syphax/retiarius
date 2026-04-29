@@ -65,12 +65,12 @@ def get_fulfillment_stats(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> 
 
     lost = conn.execute("""
         SELECT COUNT(*), SUM(quantity) FROM event_log
-        WHERE scenario_id = ? AND event_type = 'lost_sale'
+        WHERE scenario_id = ? AND event_type = 'demand_lost'
     """, [scenario_id]).fetchone()
 
     backordered = conn.execute("""
         SELECT COUNT(*), SUM(quantity) FROM event_log
-        WHERE scenario_id = ? AND event_type = 'backorder_created'
+        WHERE scenario_id = ? AND event_type = 'demand_backordered'
     """, [scenario_id]).fetchone()
 
     demand_qty = float(demand[1]) if demand[1] else 0
@@ -395,14 +395,14 @@ def get_fulfillment_by_product(conn: duckdb.DuckDBPyConnection, scenario_id: str
         SELECT el.product_id,
                SUM(CASE WHEN el.event_type = 'demand_received' THEN el.quantity ELSE 0 END) as demand_units,
                SUM(CASE WHEN el.event_type IN ('demand_fulfilled', 'backorder_fulfilled') THEN el.quantity ELSE 0 END) as fulfilled_units,
-               SUM(CASE WHEN el.event_type = 'lost_sale' THEN el.quantity ELSE 0 END) as lost_units,
-               SUM(CASE WHEN el.event_type = 'backorder_created' THEN el.quantity ELSE 0 END) as backorder_units,
+               SUM(CASE WHEN el.event_type = 'demand_lost' THEN el.quantity ELSE 0 END) as lost_units,
+               SUM(CASE WHEN el.event_type = 'demand_backordered' THEN el.quantity ELSE 0 END) as backorder_units,
                SUM(CASE WHEN el.event_type IN ('demand_fulfilled', 'backorder_fulfilled')
                    THEN el.quantity * COALESCE(p.base_price, 0) ELSE 0 END) as value_shipped
         FROM event_log el
         LEFT JOIN product p ON el.product_id = p.product_id
         WHERE el.scenario_id = ?
-          AND el.event_type IN ('demand_received', 'demand_fulfilled', 'backorder_fulfilled', 'lost_sale', 'backorder_created')
+          AND el.event_type IN ('demand_received', 'demand_fulfilled', 'backorder_fulfilled', 'demand_lost', 'demand_backordered')
         GROUP BY el.product_id
         ORDER BY demand_units DESC
     """, [scenario_id]).fetchall()

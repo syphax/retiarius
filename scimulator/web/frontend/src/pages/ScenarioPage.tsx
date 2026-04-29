@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { useParams, useSearchParams, Link } from 'react-router-dom'
+import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom'
 import {
   getResultsSummary,
   getEvents as getEventsApi,
@@ -10,6 +10,9 @@ import {
   getInventoryKpis,
   getRegistryScenario,
   updateRegistryScenario,
+  rerunScenario,
+  duplicateScenario,
+  archiveScenario,
   getOrgConfig,
   fulfillmentCsvUrl,
   eventsExportUrl,
@@ -131,9 +134,11 @@ export default function ScenarioPage() {
   const [editName, setEditName] = useState('')
   const [editDesc, setEditDesc] = useState('')
 
+  const navigate = useNavigate()
   const projectId = dbName || ''
   const [overviewKpis, setOverviewKpis] = useState<{ avg_inventory_value: number; months_of_supply: number } | null>(null)
   const [registryStatus, setRegistryStatus] = useState<string | null>(null)
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null)
 
   const sectionCtx = useSectionProvider()
 
@@ -192,6 +197,43 @@ export default function ScenarioPage() {
     setEditing(false)
   }
 
+  async function handleRun() {
+    if (!dbName || !scenarioId) return
+    setActionInProgress('run')
+    try {
+      await rerunScenario(dbName, scenarioId)
+      refreshData()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setActionInProgress(null)
+    }
+  }
+
+  async function handleDuplicate() {
+    if (!projectId || !scenarioId) return
+    setActionInProgress('dup')
+    try {
+      const result = await duplicateScenario(projectId, scenarioId)
+      navigate(`/scenario/${encodeURIComponent(dbName!)}/${encodeURIComponent(result.scenario_id)}?tab=configure`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setActionInProgress(null)
+    }
+  }
+
+  async function handleArchive() {
+    if (!projectId || !scenarioId) return
+    if (!confirm(`Archive "${scenarioName}"? It will be hidden from the project.`)) return
+    try {
+      await archiveScenario(projectId, scenarioId)
+      navigate(`/project/${encodeURIComponent(dbName!)}/${encodeURIComponent(projectId)}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   if (loading) return <p>Loading results...</p>
   if (error && !data && activeTab !== 'configure') return <div className="error">Error: {error}</div>
   if (!dbName || !scenarioId) return <div className="error">No data</div>
@@ -247,15 +289,52 @@ export default function ScenarioPage() {
             </>
           )}
           <div className="scenario-meta">
-            {metadata ? (
-              <>
-                <span className={`status-badge status-${metadata.status}`}>{String(metadata.status)}</span>
-                <span>{String(metadata.total_steps)} steps</span>
-                <span>{String(metadata.wall_clock_seconds)}s runtime</span>
-              </>
-            ) : (
-              <span className={`status-badge status-${registryStatus || 'none'}`}>{registryStatus || 'not run'}</span>
-            )}
+            {(() => {
+              const displayStatus = isModified ? 'modified' : (metadata?.status || registryStatus || 'not run')
+              return (
+                <>
+                  <span className={`status-badge status-${displayStatus}`}>{displayStatus}</span>
+                  {metadata && (
+                    <>
+                      <span>{String(metadata.total_steps)} steps</span>
+                      <span>{String(metadata.wall_clock_seconds)}s runtime</span>
+                    </>
+                  )}
+                </>
+              )
+            })()}
+          </div>
+          <div className="scenario-actions">
+            <button
+              className="icon-btn"
+              title="Configure scenario"
+              onClick={() => setActiveTab('configure')}
+            >
+              {'\u2699'}
+            </button>
+            <button
+              className="icon-btn"
+              title="Run scenario"
+              disabled={actionInProgress === 'run'}
+              onClick={handleRun}
+            >
+              {actionInProgress === 'run' ? '...' : '\u25B6'}
+            </button>
+            <button
+              className="icon-btn"
+              title="Duplicate scenario"
+              disabled={actionInProgress === 'dup'}
+              onClick={handleDuplicate}
+            >
+              {'\u2398'}
+            </button>
+            <button
+              className="icon-btn icon-btn-danger"
+              title="Archive scenario"
+              onClick={handleArchive}
+            >
+              {'\u2715'}
+            </button>
           </div>
         </div>
 

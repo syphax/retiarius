@@ -501,7 +501,7 @@ class DrawdownEngine:
                 product_id, qty, is_backorder=True
             )
             unfulfilled = qty - fulfilled_qty
-            if unfulfilled > 0:
+            if unfulfilled > 0.001:
                 remaining_backorders.append(
                     (demand_id, demand_node_id, product_id, unfulfilled, original_date)
                 )
@@ -557,7 +557,7 @@ class DrawdownEngine:
             )
 
             unfulfilled = qty - fulfilled_qty
-            if unfulfilled > 0:
+            if unfulfilled > 0.001:
                 self._handle_unfulfilled(
                     sim_date, sim_step, demand_id, demand_node_id,
                     product_id, unfulfilled
