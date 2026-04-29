@@ -44,7 +44,7 @@ def get_event_summary(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> List
         {
             "event_type": r[0],
             "count": r[1],
-            "total_qty": float(r[2]) if r[2] else None,
+            "total_qty": int(r[2]) if r[2] else None,
             "total_cost": float(r[3]) if r[3] else None,
         }
         for r in rows
@@ -73,8 +73,8 @@ def get_fulfillment_stats(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> 
         WHERE scenario_id = ? AND event_type = 'demand_backordered'
     """, [scenario_id]).fetchone()
 
-    demand_qty = float(demand[1]) if demand[1] else 0
-    fulfilled_qty = float(fulfilled[1]) if fulfilled[1] else 0
+    demand_qty = int(demand[1]) if demand[1] else 0
+    fulfilled_qty = int(fulfilled[1]) if fulfilled[1] else 0
     fill_rate = (fulfilled_qty / demand_qty * 100) if demand_qty > 0 else 0
 
     return {
@@ -84,9 +84,9 @@ def get_fulfillment_stats(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> 
         "fulfilled_units": fulfilled_qty,
         "fill_rate_pct": round(fill_rate, 1),
         "lost_sale_events": lost[0],
-        "lost_sale_units": float(lost[1]) if lost[1] else 0,
+        "lost_sale_units": int(lost[1]) if lost[1] else 0,
         "backorder_events": backordered[0],
-        "backorder_units": float(backordered[1]) if backordered[1] else 0,
+        "backorder_units": int(backordered[1]) if backordered[1] else 0,
     }
 
 
@@ -138,7 +138,7 @@ def get_inventory_summary(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> 
         "states": [
             {
                 "state": r[0],
-                "quantity": float(r[1]),
+                "quantity": int(r[1]),
                 "nodes": r[2],
                 "products": r[3],
             }
@@ -272,9 +272,9 @@ def get_inventory_kpis(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> Opt
         WHERE scenario_id = ? AND event_type IN ('demand_fulfilled', 'backorder_fulfilled')
     """, [scenario_id]).fetchone()[0]
 
-    avg_inv = float(avg_inv) if avg_inv else 0
+    avg_inv = int(avg_inv) if avg_inv else 0
     avg_value = float(avg_value) if avg_value else 0
-    fulfilled = float(fulfilled) if fulfilled else 0
+    fulfilled = int(fulfilled) if fulfilled else 0
     monthly_sales = fulfilled / num_months if num_months > 0 else 0
 
     mos = avg_inv / monthly_sales if monthly_sales > 0 else 0
@@ -317,7 +317,7 @@ def get_avg_inventory_by_node(conn: duckdb.DuckDBPyConnection, scenario_id: str)
         {
             "dist_node_id": r[0],
             "avg_parts_in_stock": round(float(r[1]), 0) if r[1] else 0,
-            "avg_units_in_stock": round(float(r[2]), 0) if r[2] else 0,
+            "avg_units_in_stock": int(round(float(r[2]))) if r[2] else 0,
             "avg_value_in_stock": round(float(r[3]), 2) if r[3] else 0,
         }
         for r in rows
@@ -381,7 +381,7 @@ def get_fulfillment_by_node(conn: duckdb.DuckDBPyConnection, scenario_id: str) -
         {
             "dist_node_id": r[0],
             "fulfilled_events": r[1],
-            "fulfilled_units": float(r[2]) if r[2] else 0,
+            "fulfilled_units": int(r[2]) if r[2] else 0,
             "fulfillment_cost": float(r[3]) if r[3] else 0,
             "value_shipped": float(r[4]) if r[4] else 0,
         }
@@ -410,12 +410,12 @@ def get_fulfillment_by_product(conn: duckdb.DuckDBPyConnection, scenario_id: str
     return [
         {
             "product_id": r[0],
-            "demand_units": float(r[1]),
-            "fulfilled_units": float(r[2]),
-            "lost_units": float(r[3]),
-            "backorder_units": float(r[4]),
+            "demand_units": int(r[1]),
+            "fulfilled_units": int(r[2]),
+            "lost_units": int(r[3]),
+            "backorder_units": int(r[4]),
             "value_shipped": float(r[5]),
-            "fill_rate_pct": round(float(r[2]) / float(r[1]) * 100, 1) if r[1] else 0,
+            "fill_rate_pct": round(int(r[2]) / int(r[1]) * 100, 1) if r[1] else 0,
         }
         for r in rows
     ]
@@ -451,7 +451,7 @@ def get_fulfillment_by_days(conn: duckdb.DuckDBPyConnection, scenario_id: str) -
 
     for transit_days, qty, value in rows:
         td = float(transit_days)
-        q = float(qty) if qty else 0
+        q = int(qty) if qty else 0
         v = float(value) if value else 0
         bucket_key = int(td) if td < 5 else 5
         buckets[bucket_key]["qty"] += q
@@ -539,7 +539,7 @@ def get_node_summary(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> Dict:
         GROUP BY el.node_id
     """, [scenario_id]).fetchall():
         dist_stats[r[0]] = {
-            "fulfilled_units": float(r[1]) if r[1] else 0,
+            "fulfilled_units": int(r[1]) if r[1] else 0,
             "fulfillment_cost": float(r[2]) if r[2] else 0,
             "fixed_cost_total": float(r[3]) if r[3] else 0,
             "overage_cost": float(r[4]) if r[4] else 0,
@@ -558,7 +558,7 @@ def get_node_summary(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> Dict:
             WHERE scenario_id = ? AND sim_date = ? AND inventory_state = 'saleable'
             GROUP BY dist_node_id
         """, [scenario_id, last_date]).fetchall():
-            inv_by_node[r[0]] = float(r[1])
+            inv_by_node[r[0]] = int(r[1])
 
     distribution = []
     for r in dist_nodes:
@@ -612,7 +612,7 @@ def get_node_summary(conn: duckdb.DuckDBPyConnection, scenario_id: str) -> Dict:
         WHERE el.scenario_id = ? AND el.event_type = 'demand_received'
         GROUP BY el.node_id
     """, [scenario_id]).fetchall():
-        demand_stats[r[0]] = float(r[1])
+        demand_stats[r[0]] = int(r[1])
 
     # Note: demand events use dest_node from edge, but demand_received uses node_id
     # as the demand node itself. Let's also check via edge join.
@@ -671,7 +671,7 @@ def get_transportation_summary(conn: duckdb.DuckDBPyConnection, scenario_id: str
             "distance": float(r[7]) if r[7] else None,
             "distance_uom": r[8],
             "shipments": r[9],
-            "total_qty": float(r[10]) if r[10] else 0,
+            "total_qty": int(r[10]) if r[10] else 0,
             "total_cost": float(r[11]) if r[11] else 0,
         }
         for r in rows

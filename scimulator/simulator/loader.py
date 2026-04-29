@@ -497,7 +497,7 @@ def _load_demand(conn, config: ScenarioConfig):
                      'demand_datetime', 'demand_node_id', 'product_id',
                      'quantity', 'order_id']].copy()
     insert_df['demand_id'] = insert_df['demand_id'].astype(str)
-    insert_df['quantity'] = insert_df['quantity'].astype(float)
+    insert_df['quantity'] = insert_df['quantity'].round().astype(int)
 
     conn.execute("""
         INSERT OR IGNORE INTO demand

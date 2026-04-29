@@ -74,6 +74,27 @@ def _migrate(conn: duckdb.DuckDBPyConnection):
             if col not in scen_cols:
                 conn.execute(f"ALTER TABLE scenario ADD COLUMN {col} {col_type}")
 
+    # v0.5.1: migrate quantity columns from DECIMAL to INTEGER
+    qty_tables = {
+        'demand': 'quantity',
+        'inbound_schedule': 'quantity',
+        'initial_inventory': 'quantity',
+        'purchase_order': 'quantity',
+        'event_log': 'quantity',
+        'inventory_snapshot': 'quantity',
+    }
+    for tbl, col in qty_tables.items():
+        try:
+            col_type = conn.execute(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_name = ? AND column_name = ?",
+                [tbl, col],
+            ).fetchone()
+            if col_type and col_type[0] != 'INTEGER':
+                conn.execute(f"ALTER TABLE {tbl} ALTER COLUMN {col} TYPE INTEGER")
+        except Exception:
+            pass  # table may not exist yet
+
     # v0.4: fulfillment_rank and optimal_cost on event_log
     if cols:  # cols = event_log columns from above
         for col, col_type in (('fulfillment_rank', 'INTEGER'),
@@ -93,7 +114,7 @@ def _migrate(conn: duckdb.DuckDBPyConnection):
                 sim_date DATE NOT NULL,
                 supply_node_id TEXT NOT NULL,
                 product_id TEXT NOT NULL,
-                quantity DECIMAL(12,2) NOT NULL,
+                quantity INTEGER NOT NULL,
                 expected_arrival DATE,
                 actual_arrival DATE,
                 dest_node_id TEXT NOT NULL,
@@ -490,7 +511,7 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             demand_datetime TIMESTAMP,
             demand_node_id TEXT NOT NULL,
             product_id TEXT NOT NULL,
-            quantity DECIMAL(12,2) NOT NULL,
+            quantity INTEGER NOT NULL,
             order_id TEXT,
             PRIMARY KEY (dataset_version_id, demand_id)
         )
@@ -503,7 +524,7 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             supply_node_id TEXT NOT NULL,
             dest_node_id TEXT NOT NULL,
             product_id TEXT NOT NULL,
-            quantity DECIMAL(12,2) NOT NULL,
+            quantity INTEGER NOT NULL,
             ship_date DATE NOT NULL,
             arrival_date DATE NOT NULL,
             PRIMARY KEY (dataset_version_id, inbound_id)
@@ -516,7 +537,7 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             dist_node_id TEXT NOT NULL,
             product_id TEXT NOT NULL,
             inventory_state TEXT NOT NULL,
-            quantity DECIMAL(12,2) NOT NULL,
+            quantity INTEGER NOT NULL,
             PRIMARY KEY (dataset_version_id, dist_node_id, product_id, inventory_state)
         )
     """)
@@ -553,7 +574,7 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             node_type TEXT,
             edge_id TEXT,
             product_id TEXT,
-            quantity DECIMAL(12,2),
+            quantity INTEGER,
             from_state TEXT,
             to_state TEXT,
             demand_id TEXT,
@@ -572,7 +593,7 @@ def _create_schema(conn: duckdb.DuckDBPyConnection):
             dist_node_id TEXT NOT NULL,
             product_id TEXT NOT NULL,
             inventory_state TEXT NOT NULL,
-            quantity DECIMAL(12,2) NOT NULL,
+            quantity INTEGER NOT NULL,
             total_cube DECIMAL(14,2),
             total_cube_uom TEXT DEFAULT 'L'
         )

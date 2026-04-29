@@ -32,7 +32,7 @@ class PurchaseOrder:
     supply_node_id: str
     dest_node_id: str
     product_id: str
-    quantity: float
+    quantity: int
     expected_arrival: date
     cube: float
     status: str = 'pending'  # pending, consolidating, in_transit, received
@@ -212,7 +212,7 @@ class PeriodicReorderPolicy:
         return days_elapsed % self.order_frequency_days == 0
 
     def compute_orders(self, sim_date: date,
-                       inventory: Dict[Tuple[str, str, str], float],
+                       inventory: Dict[Tuple[str, str, str], int],
                        pending_pos: List[PurchaseOrder]) -> List[PurchaseOrder]:
         """Compute purchase orders for all products that need reordering.
 
@@ -256,11 +256,7 @@ class PeriodicReorderPolicy:
             if order_qty <= 0:
                 continue
 
-            # Round to integer (ceil if 0 < qty < 1, else normal rounding)
-            if 0 < order_qty < 1:
-                order_qty = 1
-            else:
-                order_qty = round(order_qty)
+            order_qty = max(1, round(order_qty))
 
             # Expected arrival = sim_date + N
             expected_arrival = sim_date + timedelta(days=int(math.ceil(n_days)))
@@ -402,26 +398,32 @@ class FairShareAllocator:
 
         logger.info(f"Computed demand fractions for {len(self._demand_fractions)} products")
 
-    def allocate(self, product_id: str, order_qty: float,
-                 inventory: Dict[Tuple[str, str, str], float],
-                 expected_arrival: date) -> Dict[str, float]:
+    def allocate(self, product_id: str, order_qty: int,
+                 inventory: Dict[Tuple[str, str, str], int],
+                 expected_arrival: date) -> Dict[str, int]:
         """Allocate order_qty across nodes to equalize days-of-supply at arrival.
 
         1. For each node, estimate inventory at arrival (current - forecasted demand)
         2. Compute target DoS = (total_inv + order_qty) / total_daily_demand
         3. Each node gets: max(0, target_dos * node_daily_demand - node_inv_at_arrival)
-        4. Normalize so allocations sum to order_qty
+        4. Normalize so allocations sum to order_qty (using largest-remainder rounding)
         """
         fractions = self._demand_fractions.get(product_id, {})
         if not fractions:
-            # No demand data: can't allocate. Return empty.
             return {}
 
         daily_rate = self.forecast.get_daily_demand_rate(product_id)
         if daily_rate <= 0:
-            # Equal split
+            # Equal split with largest-remainder rounding
             n = len(fractions)
-            return {node_id: order_qty / n for node_id in fractions} if n > 0 else {}
+            if n == 0:
+                return {}
+            base = order_qty // n
+            remainder = order_qty - base * n
+            result = {}
+            for i, node_id in enumerate(sorted(fractions)):
+                result[node_id] = base + (1 if i < remainder else 0)
+            return result
 
         # Node-level daily demand rates
         node_rates = {node_id: frac * daily_rate for node_id, frac in fractions.items()}
@@ -429,7 +431,7 @@ class FairShareAllocator:
         # Current inventory per node (saleable + received states, approximation)
         node_inv = {}
         for node_id in fractions:
-            inv = 0.0
+            inv = 0
             for state in ('saleable', 'received', 'in_transit', 'committed'):
                 inv += inventory.get((node_id, product_id, state), 0)
             node_inv[node_id] = inv
@@ -439,7 +441,12 @@ class FairShareAllocator:
 
         if total_rate <= 0:
             n = len(fractions)
-            return {node_id: order_qty / n for node_id in fractions}
+            base = order_qty // n
+            remainder = order_qty - base * n
+            result = {}
+            for i, node_id in enumerate(sorted(fractions)):
+                result[node_id] = base + (1 if i < remainder else 0)
+            return result
 
         # Target days of supply after order arrives
         target_dos = (total_inv + order_qty) / total_rate
@@ -448,16 +455,28 @@ class FairShareAllocator:
         raw_alloc = {}
         for node_id in fractions:
             needed = target_dos * node_rates[node_id] - node_inv[node_id]
-            raw_alloc[node_id] = max(0, needed)
+            raw_alloc[node_id] = max(0.0, needed)
 
         # Normalize to sum to order_qty
         total_raw = sum(raw_alloc.values())
         if total_raw <= 0:
-            # All nodes already above target; distribute proportionally to demand
-            return {node_id: order_qty * frac for node_id, frac in fractions.items()}
+            raw_alloc = {node_id: frac for node_id, frac in fractions.items()}
+            total_raw = sum(raw_alloc.values())
 
         scale = order_qty / total_raw
-        return {node_id: qty * scale for node_id, qty in raw_alloc.items()}
+        scaled = {node_id: qty * scale for node_id, qty in raw_alloc.items()}
+
+        # Largest-remainder rounding to ensure sum == order_qty
+        floored = {node_id: int(v) for node_id, v in scaled.items()}
+        remainders = {node_id: scaled[node_id] - floored[node_id] for node_id in scaled}
+        shortfall = order_qty - sum(floored.values())
+        for node_id in sorted(remainders, key=remainders.get, reverse=True):
+            if shortfall <= 0:
+                break
+            floored[node_id] += 1
+            shortfall -= 1
+
+        return floored
 
 
 def create_reorder_policy(name: str, **kwargs):

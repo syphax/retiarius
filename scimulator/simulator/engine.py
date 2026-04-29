@@ -86,7 +86,7 @@ class DrawdownEngine:
         self.rng = np.random.default_rng(42)
 
         # In-memory inventory state: {(dist_node_id, product_id, state): quantity}
-        self._inventory: Dict[Tuple[str, str, str], float] = {}
+        self._inventory: Dict[Tuple[str, str, str], int] = {}
 
         # Backorder queue: [(demand_id, demand_node_id, product_id, quantity, sim_date)]
         self._backorders: List[Tuple] = []
@@ -246,7 +246,7 @@ class DrawdownEngine:
 
         for dist_node_id, product_id, state, qty in rows:
             key = (dist_node_id, product_id, state)
-            self._inventory[key] = float(qty)
+            self._inventory[key] = int(qty)
 
         total_units = sum(self._inventory.values())
         logger.info(f"Initialized inventory: {len(rows)} positions, {total_units:.0f} total units")
@@ -393,7 +393,7 @@ class DrawdownEngine:
             if po.expected_arrival is not None and po.expected_arrival <= sim_date:
                 # PO arrives: add to received inventory
                 key = (po.dest_node_id, po.product_id, 'received')
-                self._inventory[key] = self._inventory.get(key, 0) + po.quantity
+                self._inventory[key] = self._inventory.get(key, 0) + int(po.quantity)
 
                 po.status = 'received'
                 po.actual_arrival = sim_date
@@ -456,7 +456,7 @@ class DrawdownEngine:
         rows = self.conn.execute(query, params).fetchall()
 
         for inbound_id, supply_node_id, dest_node_id, product_id, qty in rows:
-            qty = float(qty)
+            qty = int(qty)
 
             # Add to received inventory
             key = (dest_node_id, product_id, 'received')
@@ -501,7 +501,7 @@ class DrawdownEngine:
                 product_id, qty, is_backorder=True
             )
             unfulfilled = qty - fulfilled_qty
-            if unfulfilled > 0.001:
+            if unfulfilled > 0:
                 remaining_backorders.append(
                     (demand_id, demand_node_id, product_id, unfulfilled, original_date)
                 )
@@ -542,7 +542,7 @@ class DrawdownEngine:
         rows = self.conn.execute(query, params).fetchall()
 
         for demand_id, demand_node_id, product_id, qty in rows:
-            qty = float(qty)
+            qty = int(qty)
 
             # Log demand received
             self._log_event(sim_date, sim_step, 'demand_received',
@@ -557,15 +557,15 @@ class DrawdownEngine:
             )
 
             unfulfilled = qty - fulfilled_qty
-            if unfulfilled > 0.001:
+            if unfulfilled > 0:
                 self._handle_unfulfilled(
                     sim_date, sim_step, demand_id, demand_node_id,
                     product_id, unfulfilled
                 )
 
     def _try_fulfill(self, sim_date: date, sim_step: int, demand_id: str,
-                     demand_node_id: str, product_id: str, qty: float,
-                     is_backorder: bool = False) -> float:
+                     demand_node_id: str, product_id: str, qty: int,
+                     is_backorder: bool = False) -> int:
         """Try to fulfill demand using the active fulfillment strategy.
 
         Returns the quantity successfully fulfilled.
@@ -573,7 +573,7 @@ class DrawdownEngine:
         results = self._fulfillment_strategy.fulfill(
             demand_node_id, product_id, qty)
 
-        total_fulfilled = 0.0
+        total_fulfilled = 0
         for r in results:
             event_type = 'backorder_fulfilled' if is_backorder else 'demand_fulfilled'
             routes = self._fulfillment_routes.get(demand_node_id, [])
@@ -604,7 +604,7 @@ class DrawdownEngine:
 
     def _handle_unfulfilled(self, sim_date: date, sim_step: int,
                             demand_id: str, demand_node_id: str,
-                            product_id: str, qty: float):
+                            product_id: str, qty: int):
         """Handle demand that couldn't be fulfilled: backorder or lost sale."""
         if self.rng.random() < self.backorder_prob:
             # Backorder
@@ -793,7 +793,7 @@ class DrawdownEngine:
     def _log_event(self, sim_date: date, sim_step: int, event_type: str,
                    node_id: str = None, node_type: str = None,
                    edge_id: str = None, product_id: str = None,
-                   quantity: float = None, from_state: str = None,
+                   quantity: int = None, from_state: str = None,
                    to_state: str = None, demand_id: str = None,
                    cost: float = None, duration: float = None,
                    detail: str = None,
@@ -823,7 +823,7 @@ class DrawdownEngine:
                 'sim_date': pl.Date, 'sim_step': pl.Int32,
                 'event_type': pl.Utf8, 'node_id': pl.Utf8,
                 'node_type': pl.Utf8, 'edge_id': pl.Utf8,
-                'product_id': pl.Utf8, 'quantity': pl.Float64,
+                'product_id': pl.Utf8, 'quantity': pl.Int64,
                 'from_state': pl.Utf8, 'to_state': pl.Utf8,
                 'demand_id': pl.Utf8, 'cost': pl.Float64,
                 'duration': pl.Float64, 'detail': pl.Utf8,
@@ -874,7 +874,7 @@ class DrawdownEngine:
             schema={
                 'scenario_id': pl.Utf8, 'sim_date': pl.Date,
                 'dist_node_id': pl.Utf8, 'product_id': pl.Utf8,
-                'inventory_state': pl.Utf8, 'quantity': pl.Float64,
+                'inventory_state': pl.Utf8, 'quantity': pl.Int64,
                 'total_cube': pl.Float64, 'total_cube_uom': pl.Utf8,
             },
             orient='row',

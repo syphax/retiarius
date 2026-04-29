@@ -151,7 +151,7 @@ class InboundShipment:
     supply_node_id: str
     dest_node_id: str
     product_id: str
-    quantity: float
+    quantity: int
     ship_date: str  # ISO date string
     arrival_date: str  # ISO date string
 
@@ -161,7 +161,7 @@ class InitialInventory:
     dist_node_id: str
     product_id: str
     inventory_state: str  # 'saleable', 'received', etc.
-    quantity: float
+    quantity: int
 
 
 @dataclass

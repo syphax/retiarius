@@ -14,7 +14,7 @@ class FulfillmentResult:
     """One fulfillment action (a portion of demand filled from one node)."""
     dist_node_id: str
     edge_id: str
-    quantity: float
+    quantity: int
     cost: float
     rank: int           # 1 = best per active policy
     optimal_cost: float  # min outbound cost ignoring inventory
@@ -24,7 +24,7 @@ class FulfillmentStrategy:
     """Base class for fulfillment strategies."""
 
     def __init__(self, routes: Dict[str, List[Dict]],
-                 inventory: Dict[Tuple[str, str, str], float]):
+                 inventory: Dict[Tuple[str, str, str], int]):
         self._routes = routes
         self._inventory = inventory
         self._optimal_costs = self._precompute_optimal_costs()
@@ -41,7 +41,7 @@ class FulfillmentStrategy:
         return optimal
 
     def fulfill(self, demand_node_id: str, product_id: str,
-                qty: float) -> List[FulfillmentResult]:
+                qty: int) -> List[FulfillmentResult]:
         raise NotImplementedError
 
 
@@ -50,7 +50,7 @@ class ClosestNodeWins(FulfillmentStrategy):
     full quantity, continue to the next closest, and so on."""
 
     def fulfill(self, demand_node_id: str, product_id: str,
-                qty: float) -> List[FulfillmentResult]:
+                qty: int) -> List[FulfillmentResult]:
         routes = self._routes.get(demand_node_id, [])
         if not routes:
             return []
@@ -97,7 +97,7 @@ class ClosestNodeOnly(FulfillmentStrategy):
     the demand is unfulfilled (backorder or lost sale)."""
 
     def fulfill(self, demand_node_id: str, product_id: str,
-                qty: float) -> List[FulfillmentResult]:
+                qty: int) -> List[FulfillmentResult]:
         routes = self._routes.get(demand_node_id, [])
         if not routes:
             return []
@@ -132,7 +132,7 @@ class ClosestNodeOnly(FulfillmentStrategy):
 
 
 def create_strategy(name: str, routes: Dict[str, List[Dict]],
-                    inventory: Dict[Tuple[str, str, str], float]) -> FulfillmentStrategy:
+                    inventory: Dict[Tuple[str, str, str], int]) -> FulfillmentStrategy:
     """Factory: create a fulfillment strategy by name."""
     strategies = {
         'closest_node_wins': ClosestNodeWins,
