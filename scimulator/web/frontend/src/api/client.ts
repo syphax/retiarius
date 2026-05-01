@@ -598,6 +598,67 @@ export function listDatasets(dbName: string): Promise<DatasetsResponse> {
   return fetchJson(`${BASE}/datasets?db=${encodeURIComponent(dbName)}`);
 }
 
+// Demand summary per dataset version
+export interface DemandVersionSummary {
+  dataset_version_id: string;
+  name: string;
+  description: string | null;
+  created_at: string | null;
+  row_count: number;
+  start_date: string | null;
+  end_date: string | null;
+  demand_node_count: number;
+  scenarios: { scenario_id: string; name: string }[];
+}
+
+export function getDemandSummary(dbName: string): Promise<{ dataset_versions: DemandVersionSummary[] }> {
+  return fetchJson(`${BASE}/datasets/demand/summary?db=${encodeURIComponent(dbName)}`);
+}
+
+export interface InventoryVersionSummary {
+  dataset_version_id: string;
+  name: string;
+  description: string | null;
+  created_at: string | null;
+  row_count: number;
+  node_count: number;
+  product_count: number;
+  scenarios: { scenario_id: string; name: string }[];
+}
+
+export function getInventorySummary(dbName: string): Promise<{ dataset_versions: InventoryVersionSummary[] }> {
+  return fetchJson(`${BASE}/datasets/initial_inventory/summary?db=${encodeURIComponent(dbName)}`);
+}
+
+export interface InboundVersionSummary {
+  dataset_version_id: string;
+  name: string;
+  description: string | null;
+  created_at: string | null;
+  row_count: number;
+  supply_node_count: number;
+  dest_node_count: number;
+  product_count: number;
+  start_date: string | null;
+  end_date: string | null;
+  scenarios: { scenario_id: string; name: string }[];
+}
+
+export function getInboundSummary(dbName: string): Promise<{ dataset_versions: InboundVersionSummary[] }> {
+  return fetchJson(`${BASE}/datasets/inbound_schedule/summary?db=${encodeURIComponent(dbName)}`);
+}
+
+export interface TopologyColumn {
+  name: string;
+  type: string;
+  nullable: boolean;
+  key: string | null;
+}
+
+export function getTopologySchema(dbName: string, table: string): Promise<{ table: string; columns: TopologyColumn[]; row_count: number }> {
+  return fetchJson(`${BASE}/datasets/topology/${encodeURIComponent(table)}/schema?db=${encodeURIComponent(dbName)}`);
+}
+
 // Entity set management
 export interface EntitySetTableInfo {
   set_table: string;

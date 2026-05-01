@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
   listEntitySetTables, listEntityItems, createEntitySet,
 } from '../api/client'
@@ -10,6 +10,8 @@ type PageSize = number | 'All'
 
 export default function EntitySetCreatePage() {
   const { dbName } = useParams<{ dbName: string }>()
+  const [searchParams] = useSearchParams()
+  const presetType = searchParams.get('type') ?? ''
   const navigate = useNavigate()
 
   const [tables, setTables] = useState<EntitySetTableInfo[]>([])
@@ -35,10 +37,13 @@ export default function EntitySetCreatePage() {
     listEntitySetTables(dbName)
       .then(data => {
         setTables(data.tables)
+        if (presetType && data.tables.some(t => t.set_table === presetType)) {
+          setSelectedTable(presetType)
+        }
         setLoading(false)
       })
       .catch(err => { setError(err.message); setLoading(false) })
-  }, [dbName])
+  }, [dbName, presetType])
 
   // Load items when table is selected
   useEffect(() => {

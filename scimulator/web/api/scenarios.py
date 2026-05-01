@@ -1128,6 +1128,193 @@ async def list_datasets(db: str, request: Request):
         conn.close()
 
 
+_TOPOLOGY_TABLES = {'product', 'supply_node', 'distribution_node', 'demand_node', 'customer', 'edge'}
+
+
+@router.get("/datasets/topology/{table}/schema")
+async def topology_schema(table: str, db: str, request: Request):
+    """Return column name + DuckDB type for a topology table, plus row count."""
+    if table not in _TOPOLOGY_TABLES:
+        return {'error': f'Unknown topology table: {table}'}
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        described = conn.execute(f"DESCRIBE {table}").fetchall()
+        # DESCRIBE returns: column_name, column_type, null, key, default, extra
+        columns = [
+            {'name': r[0], 'type': r[1], 'nullable': (r[2] == 'YES'), 'key': r[3]}
+            for r in described
+        ]
+        row_count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        return {'table': table, 'columns': columns, 'row_count': row_count}
+    finally:
+        conn.close()
+
+
+@router.get("/datasets/initial_inventory/summary")
+async def initial_inventory_summary(db: str, request: Request):
+    """Per-dataset-version initial-inventory summary: row count, distinct nodes, distinct products.
+
+    Inventory value-at-cost is deferred (TODO(value)) until product-version pricing is wired up.
+    """
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        versions = conn.execute("""
+            SELECT dataset_version_id, name, description, created_at
+            FROM dataset_version
+            ORDER BY name
+        """).fetchall()
+
+        rows = []
+        for v in versions:
+            vid = v[0]
+            try:
+                stats = conn.execute("""
+                    SELECT
+                        COUNT(*) AS row_count,
+                        COUNT(DISTINCT dist_node_id) AS node_count,
+                        COUNT(DISTINCT product_id) AS product_count
+                    FROM initial_inventory
+                    WHERE dataset_version_id = ?
+                """, [vid]).fetchone()
+                row_count, node_count, product_count = stats
+            except Exception:
+                row_count, node_count, product_count = 0, 0, 0
+
+            scenario_rows = conn.execute("""
+                SELECT scenario_id, name FROM scenario
+                WHERE dataset_version_id = ? OR inventory_version_id = ?
+            """, [vid, vid]).fetchall()
+
+            rows.append({
+                'dataset_version_id': vid,
+                'name': v[1],
+                'description': v[2],
+                'created_at': str(v[3]) if v[3] else None,
+                'row_count': row_count or 0,
+                'node_count': node_count or 0,
+                'product_count': product_count or 0,
+                'scenarios': [
+                    {'scenario_id': s[0], 'name': s[1]} for s in scenario_rows
+                ],
+            })
+        return {'dataset_versions': rows}
+    finally:
+        conn.close()
+
+
+@router.get("/datasets/inbound_schedule/summary")
+async def inbound_schedule_summary(db: str, request: Request):
+    """Per-dataset-version inbound-schedule summary: row count, distinct supply/dest/product, date range."""
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        versions = conn.execute("""
+            SELECT dataset_version_id, name, description, created_at
+            FROM dataset_version
+            ORDER BY name
+        """).fetchall()
+
+        rows = []
+        for v in versions:
+            vid = v[0]
+            try:
+                stats = conn.execute("""
+                    SELECT
+                        COUNT(*) AS row_count,
+                        COUNT(DISTINCT supply_node_id) AS supply_count,
+                        COUNT(DISTINCT dest_node_id) AS dest_count,
+                        COUNT(DISTINCT product_id) AS product_count,
+                        MIN(arrival_date) AS start_date,
+                        MAX(arrival_date) AS end_date
+                    FROM inbound_schedule
+                    WHERE dataset_version_id = ?
+                """, [vid]).fetchone()
+                row_count, supply_count, dest_count, product_count, start_date, end_date = stats
+            except Exception:
+                row_count, supply_count, dest_count, product_count, start_date, end_date = 0, 0, 0, 0, None, None
+
+            scenario_rows = conn.execute("""
+                SELECT scenario_id, name FROM scenario
+                WHERE dataset_version_id = ? OR inbound_version_id = ?
+            """, [vid, vid]).fetchall()
+
+            rows.append({
+                'dataset_version_id': vid,
+                'name': v[1],
+                'description': v[2],
+                'created_at': str(v[3]) if v[3] else None,
+                'row_count': row_count or 0,
+                'supply_node_count': supply_count or 0,
+                'dest_node_count': dest_count or 0,
+                'product_count': product_count or 0,
+                'start_date': str(start_date) if start_date else None,
+                'end_date': str(end_date) if end_date else None,
+                'scenarios': [
+                    {'scenario_id': s[0], 'name': s[1]} for s in scenario_rows
+                ],
+            })
+        return {'dataset_versions': rows}
+    finally:
+        conn.close()
+
+
+@router.get("/datasets/demand/summary")
+async def demand_summary(db: str, request: Request):
+    """Per-dataset-version demand summary: row count, date range, distinct demand-node count.
+
+    Total Value / Total Qty are deferred (TODO(value)) until product-version pricing is wired up.
+    """
+    db_path = _resolve_db(db, request)
+    conn = get_connection(db_path, read_only=True)
+    try:
+        versions = conn.execute("""
+            SELECT dataset_version_id, name, description, created_at
+            FROM dataset_version
+            ORDER BY name
+        """).fetchall()
+
+        rows = []
+        for v in versions:
+            vid = v[0]
+            try:
+                stats = conn.execute("""
+                    SELECT
+                        COUNT(*) AS row_count,
+                        MIN(demand_date) AS start_date,
+                        MAX(demand_date) AS end_date,
+                        COUNT(DISTINCT demand_node_id) AS demand_node_count
+                    FROM demand
+                    WHERE dataset_version_id = ?
+                """, [vid]).fetchone()
+                row_count, start_date, end_date, dn_count = stats
+            except Exception:
+                row_count, start_date, end_date, dn_count = 0, None, None, 0
+
+            scenario_rows = conn.execute("""
+                SELECT scenario_id, name FROM scenario
+                WHERE dataset_version_id = ? OR demand_version_id = ?
+            """, [vid, vid]).fetchall()
+
+            rows.append({
+                'dataset_version_id': vid,
+                'name': v[1],
+                'description': v[2],
+                'created_at': str(v[3]) if v[3] else None,
+                'row_count': row_count or 0,
+                'start_date': str(start_date) if start_date else None,
+                'end_date': str(end_date) if end_date else None,
+                'demand_node_count': dn_count or 0,
+                'scenarios': [
+                    {'scenario_id': s[0], 'name': s[1]} for s in scenario_rows
+                ],
+            })
+        return {'dataset_versions': rows}
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Entity set management
 # ---------------------------------------------------------------------------

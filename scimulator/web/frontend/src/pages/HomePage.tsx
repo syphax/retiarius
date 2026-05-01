@@ -4,9 +4,9 @@ import {
   listScenarios, listRegistryScenarios,
   rerunScenario, duplicateScenario, archiveScenario,
   updateRegistryScenario,
-  listDatasets, deleteEntitySet,
+  listDatasets, getInventorySummary,
 } from '../api/client'
-import type { ScenarioSummary, RegistryScenarioSummary, DatasetInfo, TopologyInfo, EntitySetItem } from '../api/client'
+import type { ScenarioSummary, RegistryScenarioSummary, DatasetInfo, TopologyInfo, EntitySetItem, InventoryVersionSummary } from '../api/client'
 
 function formatTimestamp(ts: string | null): string {
   if (!ts) return '-'
@@ -44,20 +44,25 @@ type SortKey = 'scenario_id' | 'name' | 'period' | 'status' | 'tags' | 'last_run
 
 export default function HomePage() {
   const navigate = useNavigate()
-  const { dbName, projectId } = useParams<{ dbName: string; projectId: string }>()
+  const { dbName, projectId, tab } = useParams<{ dbName: string; projectId: string; tab?: string }>()
   const [scenarios, setScenarios] = useState<ScenarioSummary[]>([])
   const [registryScenarios, setRegistryScenarios] = useState<RegistryScenarioSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
 
-  // Project-level tab
-  const [activeProjectTab, setActiveProjectTab] = useState<'scenarios' | 'datasets'>('scenarios')
+  // Project-level tab — driven by URL
+  const activeProjectTab: 'scenarios' | 'datasets' = tab === 'datasets' ? 'datasets' : 'scenarios'
+  const setActiveProjectTab = useCallback((next: 'scenarios' | 'datasets') => {
+    if (!dbName || !projectId) return
+    navigate(`/project/${encodeURIComponent(dbName)}/${encodeURIComponent(projectId)}/${next}`)
+  }, [dbName, projectId, navigate])
 
   // Datasets state
   const [datasets, setDatasets] = useState<DatasetInfo[]>([])
   const [topology, setTopology] = useState<TopologyInfo[]>([])
   const [entitySets, setEntitySets] = useState<EntitySetItem[]>([])
+  const [inventoryVersions, setInventoryVersions] = useState<InventoryVersionSummary[]>([])
   const [datasetsLoading, setDatasetsLoading] = useState(false)
 
   // Sorting
@@ -95,13 +100,15 @@ export default function HomePage() {
   const refreshDatasets = useCallback(() => {
     if (!dbName) return
     setDatasetsLoading(true)
-    listDatasets(dbName)
-      .then(data => {
+    Promise.all([
+      listDatasets(dbName).then(data => {
         setDatasets(data.dataset_versions)
         setTopology(data.topology)
         setEntitySets(data.entity_sets)
-        setDatasetsLoading(false)
-      })
+      }),
+      getInventorySummary(dbName).then(d => setInventoryVersions(d.dataset_versions)),
+    ])
+      .then(() => setDatasetsLoading(false))
       .catch(err => {
         setError(err.message)
         setDatasetsLoading(false)
@@ -111,18 +118,6 @@ export default function HomePage() {
   useEffect(() => {
     if (activeProjectTab === 'datasets') refreshDatasets()
   }, [activeProjectTab, refreshDatasets])
-
-  async function handleDeleteEntitySet(s: EntitySetItem) {
-    if (!dbName) return
-    if (!confirm(`Delete entity set "${s.name}"?`)) return
-    setError(null)
-    try {
-      await deleteEntitySet(dbName, s.set_table, s.set_id)
-      refreshDatasets()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
 
   async function handleRun(scenarioId: string) {
     if (!dbName) return
@@ -304,11 +299,13 @@ export default function HomePage() {
     ;(setsByType[s.set_type] ??= []).push(s)
   }
 
-  const DATA_TABLES = [
-    { key: 'demand', label: 'Demand' },
-    { key: 'inbound_schedule', label: 'Inbound Schedule' },
-    { key: 'initial_inventory', label: 'Initial Inventory' },
-  ] as const
+  const demandVersions = datasets.filter(d => (d.row_counts['demand'] ?? 0) > 0)
+  const inventoryPresent = inventoryVersions.filter(v => v.row_count > 0)
+  const inboundPresent = datasets.filter(d => (d.row_counts['inbound_schedule'] ?? 0) > 0)
+  const projectBase = `/project/${encodeURIComponent(dbName ?? '')}/${encodeURIComponent(projectId ?? '')}`
+  const demandDetailUrl = `${projectBase}/data/demand`
+  const inventoryDetailUrl = `${projectBase}/data/initial_inventory`
+  const inboundDetailUrl = `${projectBase}/data/inbound_schedule`
 
   return (
     <div className="home-page">
@@ -490,107 +487,155 @@ export default function HomePage() {
             {/* Network Topology */}
             <section className="datasets-section">
               <h2>Network Topology</h2>
+              <p className="datasets-subtitle">
+                These tables define the ingredients of the distribution network: who are the customers, what are the products, what are the network nodes, and how are they connected?
+              </p>
               <table className="data-table">
                 <thead>
-                  <tr><th>Table</th><th>Rows</th></tr>
+                  <tr><th>Table</th><th>Rows</th><th>Entities</th></tr>
                 </thead>
                 <tbody>
-                  {topology.map(t => (
-                    <tr key={t.table}><td>{t.label}</td><td>{t.row_count.toLocaleString()}</td></tr>
-                  ))}
+                  {topology.map(t => {
+                    const userSets = setsByType[t.label]?.length ?? 0
+                    const entityCount = userSets + 1 // +1 for virtual "All"
+                    return (
+                      <tr key={t.table}>
+                        <td>
+                          <Link to={`/project/${encodeURIComponent(dbName!)}/${encodeURIComponent(projectId!)}/topology/${t.table}`}>
+                            {t.label}
+                          </Link>
+                        </td>
+                        <td>{t.row_count.toLocaleString()}</td>
+                        <td>{entityCount.toLocaleString()}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </section>
 
-            {/* Entity Sets */}
+            {/* Demand */}
             <section className="datasets-section">
-              <h2>Entity Sets</h2>
-              <p>
-                <Link to={`/datasets/${dbName}/entity-sets/create`}>+ Create new entity set</Link>
-              </p>
-              {Object.keys(setsByType).length === 0 ? (
-                <p className="empty-state">No entity sets defined. All scenarios use the full topology.</p>
+              <h2>
+                <Link to={demandDetailUrl}>Demand Data</Link>
+              </h2>
+              {demandVersions.length === 0 ? (
+                <p className="empty-state">No datasets with demand data.</p>
               ) : (
-                Object.entries(setsByType).map(([type, sets]) => (
-                  <div key={type} className="datasets-subsection">
-                    <h3>{type}</h3>
-                    <table className="data-table">
-                      <thead>
-                        <tr><th>Set ID</th><th>Name</th><th>Members</th><th>Used By</th><th></th></tr>
-                      </thead>
-                      <tbody>
-                        {sets.map(s => (
-                          <tr key={s.set_id}>
-                            <td className="scenario-id-col">{s.set_id}</td>
-                            <td>{s.name}</td>
-                            <td>{s.member_count.toLocaleString()}</td>
-                            <td>
-                              {s.scenarios.length === 0
-                                ? <span className="text-muted">{'\u2014'}</span>
-                                : s.scenarios.map((sc, i) => (
-                                  <span key={sc.scenario_id}>{i > 0 && ', '}{sc.name}</span>
-                                ))
-                              }
-                            </td>
-                            <td className="row-actions">
-                              <div className="row-actions-inner">
-                                <button
-                                  className="icon-btn icon-btn-danger"
-                                  title={s.scenarios.length > 0 ? 'Cannot delete: used by scenario(s)' : 'Delete entity set'}
-                                  disabled={s.scenarios.length > 0}
-                                  onClick={() => handleDeleteEntitySet(s)}
-                                >
-                                  {'\u2715'}
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ))
+                <table className="data-table">
+                  <thead>
+                    {/* TODO(value): add Total Value, Total Qty columns once product-version pricing is wired up */}
+                    <tr><th>Dataset Version</th><th>Name</th><th>Rows</th><th>Used By</th><th>Created</th></tr>
+                  </thead>
+                  <tbody>
+                    {demandVersions.map(d => (
+                      <tr key={d.dataset_version_id}>
+                        <td className="scenario-id-col">{d.dataset_version_id}</td>
+                        <td>{d.name}</td>
+                        <td>{(d.row_counts['demand'] ?? 0).toLocaleString()}</td>
+                        <td>
+                          {d.scenarios.length === 0
+                            ? <span className="text-muted">{'—'}</span>
+                            : d.scenarios.map((s, i) => (
+                              <span key={s.scenario_id}>{i > 0 && ', '}{s.name}</span>
+                            ))
+                          }
+                        </td>
+                        <td className="text-muted">
+                          {d.created_at ? new Date(d.created_at).toLocaleDateString() : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
             </section>
 
-            {/* Dataset Versions by Table */}
-            {DATA_TABLES.map(table => {
-              const relevant = datasets.filter(d => (d.row_counts[table.key] ?? 0) > 0)
-              return (
-                <section key={table.key} className="datasets-section">
-                  <h2>{table.label} Data</h2>
-                  {relevant.length === 0 ? (
-                    <p className="empty-state">No datasets with {table.label.toLowerCase()} data.</p>
-                  ) : (
-                    <table className="data-table">
-                      <thead>
-                        <tr><th>Dataset Version</th><th>Name</th><th>Rows</th><th>Used By</th><th>Created</th></tr>
-                      </thead>
-                      <tbody>
-                        {relevant.map(d => (
-                          <tr key={d.dataset_version_id}>
-                            <td className="scenario-id-col">{d.dataset_version_id}</td>
-                            <td>{d.name}</td>
-                            <td>{(d.row_counts[table.key] ?? 0).toLocaleString()}</td>
-                            <td>
-                              {d.scenarios.length === 0
-                                ? <span className="text-muted">{'\u2014'}</span>
-                                : d.scenarios.map((s, i) => (
-                                  <span key={s.scenario_id}>{i > 0 && ', '}{s.name}</span>
-                                ))
-                              }
-                            </td>
-                            <td className="text-muted">
-                              {d.created_at ? new Date(d.created_at).toLocaleDateString() : '\u2014'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </section>
-              )
-            })}
+            {/* Initial Conditions */}
+            <section className="datasets-section">
+              <h2>Initial Conditions</h2>
+
+              <div className="datasets-subsection">
+                <h3>
+                  <Link to={inventoryDetailUrl}>Initial Inventory Data</Link>
+                </h3>
+                {inventoryPresent.length === 0 ? (
+                  <p className="empty-state">No datasets with initial inventory data.</p>
+                ) : (
+                  <table className="data-table">
+                    <thead>
+                      {/* TODO(value): add Value (at cost) column once product-version pricing is wired up */}
+                      <tr>
+                        <th>Dataset Version</th>
+                        <th>Name</th>
+                        <th>Rows</th>
+                        <th># Nodes</th>
+                        <th># Products</th>
+                        <th>Used By</th>
+                        <th>Created</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inventoryPresent.map(v => (
+                        <tr key={v.dataset_version_id}>
+                          <td className="scenario-id-col">{v.dataset_version_id}</td>
+                          <td>{v.name}</td>
+                          <td>{v.row_count.toLocaleString()}</td>
+                          <td>{v.node_count.toLocaleString()}</td>
+                          <td>{v.product_count.toLocaleString()}</td>
+                          <td>
+                            {v.scenarios.length === 0
+                              ? <span className="text-muted">{'\u2014'}</span>
+                              : v.scenarios.map((s, i) => (
+                                <span key={s.scenario_id}>{i > 0 && ', '}{s.name}</span>
+                              ))
+                            }
+                          </td>
+                          <td className="text-muted">
+                            {v.created_at ? new Date(v.created_at).toLocaleDateString() : '\u2014'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div className="datasets-subsection">
+                <h3>
+                  <Link to={inboundDetailUrl}>Inbound Schedule Data</Link>
+                </h3>
+                {inboundPresent.length === 0 ? (
+                  <p className="empty-state">No datasets with inbound schedule data.</p>
+                ) : (
+                  <table className="data-table">
+                    <thead>
+                      <tr><th>Dataset Version</th><th>Name</th><th>Rows</th><th>Used By</th><th>Created</th></tr>
+                    </thead>
+                    <tbody>
+                      {inboundPresent.map(d => (
+                        <tr key={d.dataset_version_id}>
+                          <td className="scenario-id-col">{d.dataset_version_id}</td>
+                          <td>{d.name}</td>
+                          <td>{(d.row_counts['inbound_schedule'] ?? 0).toLocaleString()}</td>
+                          <td>
+                            {d.scenarios.length === 0
+                              ? <span className="text-muted">{'\u2014'}</span>
+                              : d.scenarios.map((s, i) => (
+                                <span key={s.scenario_id}>{i > 0 && ', '}{s.name}</span>
+                              ))
+                            }
+                          </td>
+                          <td className="text-muted">
+                            {d.created_at ? new Date(d.created_at).toLocaleDateString() : '\u2014'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </section>
           </>
         )
       )}
