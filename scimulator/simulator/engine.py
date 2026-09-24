@@ -18,6 +18,8 @@ import numpy as np
 import polars as pl
 
 from . import __version__
+from .cost import (compute_cost, warn_once, CostContext, UomConverter,
+                   TransportCostCalculator)
 from .fulfillment import create_strategy
 from .forecast import create_forecast
 from .reorder import create_reorder_policy, PurchaseOrder
@@ -101,6 +103,11 @@ class DrawdownEngine:
         # Zone lookup: edge_id -> zone (populated from zone_table for zone-derived edges)
         self._edge_zones: Dict[str, str] = {}
 
+        # Cost reference data (populated in _load_cost_reference).
+        # UoM converter and product_id -> (weight_kg, volume_l) per unit.
+        self._uom: Optional[UomConverter] = None
+        self._product_dims: Dict[str, Tuple[float, float]] = {}
+
         # Purchase orders (Phase 3)
         self._purchase_orders: List[PurchaseOrder] = []
 
@@ -128,6 +135,7 @@ class DrawdownEngine:
         ])
 
         try:
+            self._load_cost_reference()
             self._initialize_inventory()
             self._build_fulfillment_routes()
             self._initialize_strategies()
@@ -156,11 +164,35 @@ class DrawdownEngine:
             logger.error(f"Simulation failed: {e}")
             raise
 
+    def _load_cost_reference(self):
+        """Load UoM conversions and per-unit product dimensions for costing.
+
+        Populates a single UomConverter and a product_id -> (weight_kg,
+        volume_l) map so cost computations avoid per-event DB lookups and all
+        basis math runs in canonical units.
+        """
+        self._uom = UomConverter.from_conn(self.conn)
+
+        rows = self.conn.execute(
+            "SELECT product_id, weight, weight_uom, cube, cube_uom FROM product"
+        ).fetchall()
+        for pid, weight, weight_uom, cube, cube_uom in rows:
+            weight_kg = self._uom.to_default(weight, weight_uom or 'kg')
+            volume_l = self._uom.to_default(cube, cube_uom or 'L')
+            self._product_dims[pid] = (weight_kg, volume_l)
+
     def _initialize_strategies(self):
         """Initialize fulfillment strategy and (optionally) reorder policy."""
+        # Basis-aware transport cost calculator injected into the strategy so
+        # fulfillment cost honors cost_variable_basis + per-shipment cost_fixed.
+        # unit_values are omitted until dataset-version value resolution lands;
+        # pct_value edges will warn-and-zero until then.
+        cost_calculator = TransportCostCalculator(self._product_dims)
+
         # Fulfillment strategy
         self._fulfillment_strategy = create_strategy(
-            self.fulfillment_logic, self._fulfillment_routes, self._inventory)
+            self.fulfillment_logic, self._fulfillment_routes, self._inventory,
+            cost_calculator=cost_calculator)
 
         # Reorder logic (only if configured)
         if not self.reorder_logic:
@@ -261,7 +293,8 @@ class DrawdownEngine:
         """
         query = """
             SELECT e.edge_id, e.origin_node_id, e.dest_node_id,
-                   e.cost_variable, e.distance, e.mean_transit_time,
+                   e.cost_variable, e.cost_variable_basis, e.cost_fixed,
+                   e.distance, e.distance_uom, e.mean_transit_time,
                    ezm.zone
             FROM edge e
             LEFT JOIN edge_zone_map ezm ON e.edge_id = ezm.edge_id
@@ -297,12 +330,17 @@ class DrawdownEngine:
 
         rows = self.conn.execute(query, params).fetchall()
 
-        for edge_id, origin_id, dest_id, cost_var, distance, mean_tt, zone in rows:
+        for (edge_id, origin_id, dest_id, cost_var, cost_var_basis, cost_fixed,
+             distance, distance_uom, mean_tt, zone) in rows:
             route = {
                 'dist_node_id': origin_id,
                 'edge_id': edge_id,
                 'cost_variable': float(cost_var or 0),
+                'cost_variable_basis': cost_var_basis or 'per_unit',
+                'cost_fixed': float(cost_fixed or 0),
                 'distance': float(distance) if distance is not None else float('inf'),
+                'distance_km': (self._uom.to_default(distance, distance_uom or 'km')
+                                if distance is not None else 0.0),
                 'mean_transit_time': float(mean_tt) if mean_tt is not None else None,
                 'zone': str(zone) if zone is not None else None,
             }
@@ -689,14 +727,25 @@ class DrawdownEngine:
         rows = self.conn.execute(query, params).fetchall()
 
         for dist_node_id, fixed_cost, basis in rows:
-            if basis == 'per_day':
-                self._log_event(sim_date, sim_step, 'fixed_cost',
-                                node_id=dist_node_id, node_type='distribution',
-                                cost=float(fixed_cost),
-                                detail=json.dumps({
-                                    'cost_type': 'fixed_cost',
-                                    'basis': basis,
-                                }))
+            basis = basis or 'per_day'
+            # This is a per-day accrual loop; only per_day fixed costs belong
+            # here. Any other basis was previously dropped silently — warn once.
+            if basis != 'per_day':
+                warn_once(
+                    f'fixed_cost_basis:{basis}',
+                    f"distribution_node.fixed_cost with basis '{basis}' is not "
+                    f"supported by the daily fixed-cost accrual (only 'per_day'). "
+                    f"Node {dist_node_id} fixed cost is being ignored.")
+                continue
+
+            cost = compute_cost(fixed_cost, 'per_day', CostContext(days=1.0))
+            self._log_event(sim_date, sim_step, 'fixed_cost',
+                            node_id=dist_node_id, node_type='distribution',
+                            cost=cost,
+                            detail=json.dumps({
+                                'cost_type': 'fixed_cost',
+                                'basis': basis,
+                            }))
 
     def _check_capacity_overages(self, sim_date: date, sim_step: int):
         """Check if any distribution node exceeds storage capacity.
@@ -765,19 +814,37 @@ class DrawdownEngine:
             if overage <= 0:
                 continue
 
-            # Calculate penalty cost
-            # Default: 2x variable cost per unit of overage (in capacity UoM)
-            if overage_penalty is not None:
-                penalty_rate = float(overage_penalty)
-            elif variable_cost is not None:
-                penalty_rate = float(variable_cost) * 2.0
-            else:
-                penalty_rate = 0.0
+            # The overage is a volume in the node's capacity UoM. Express it in
+            # canonical liters so the basis-aware helper can cost it.
+            overage_l = self._uom.to_default(overage, capacity_uom or 'm3')
+            overage_ctx = CostContext(volume_l=overage_l)
 
-            if penalty_rate <= 0:
+            # Penalty: use the explicit overage_penalty (basis-aware) if set.
+            # Otherwise fall back to 2x variable_cost, but ONLY when
+            # variable_cost is volume-based — multiplying a per-unit or
+            # per-order rate by cubic-meters-of-overage is dimensionally
+            # meaningless (the old behavior). Warn and skip otherwise.
+            if overage_penalty is not None:
+                penalty_basis = overage_penalty_basis or 'per_m3'
+                penalty_cost = compute_cost(overage_penalty, penalty_basis,
+                                            overage_ctx)
+            elif variable_cost is not None and \
+                    (variable_cost_basis or 'per_unit') in ('per_m3', 'per_L'):
+                penalty_basis = variable_cost_basis
+                penalty_cost = compute_cost(float(variable_cost) * 2.0,
+                                            penalty_basis, overage_ctx)
+            else:
+                warn_once(
+                    f'overage_fallback:{variable_cost_basis}',
+                    f"Node {dist_node_id} exceeds capacity but has no "
+                    f"overage_penalty and variable_cost_basis "
+                    f"'{variable_cost_basis}' is not volume-based; cannot derive "
+                    f"a dimensionally valid penalty. Set overage_penalty "
+                    f"explicitly. Skipping penalty.")
                 continue
 
-            penalty_cost = overage * penalty_rate
+            if penalty_cost <= 0:
+                continue
 
             self._log_event(sim_date, sim_step, 'capacity_overage',
                             node_id=dist_node_id, node_type='distribution',
@@ -787,7 +854,7 @@ class DrawdownEngine:
                                 'capacity': capacity,
                                 'capacity_uom': capacity_uom or 'm3',
                                 'overage': round(overage, 2),
-                                'penalty_rate': penalty_rate,
+                                'penalty_basis': penalty_basis,
                             }))
 
     def _log_event(self, sim_date: date, sim_step: int, event_type: str,
