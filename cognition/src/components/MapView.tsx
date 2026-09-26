@@ -1,11 +1,11 @@
 import { useMemo } from 'react';
 import DeckGL from '@deck.gl/react';
 import { WebMercatorViewport } from '@deck.gl/core';
-import { ScatterplotLayer } from '@deck.gl/layers';
+import { LineLayer, PathLayer, ScatterplotLayer } from '@deck.gl/layers';
 import { Map as BaseMap } from 'react-map-gl/maplibre';
 import type { Point } from '../data/types';
-import type { Solution } from '../solver/solve';
-import type { NodeStats } from '../solver/model';
+import type { FrameView, NodeView } from '../playback/frameView';
+import { greatCirclePath } from '../utils/greatCircle';
 import { NODE_PALETTE, POINT_COLORS, cssColor, type RGB } from '../utils/colors';
 
 const DEFAULT_VIEW_STATE = { longitude: -98.5, latitude: 39.8, zoom: 3.6, pitch: 0, bearing: 0 };
@@ -36,32 +36,36 @@ function fitView(points: Point[]) {
 }
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 
+export interface DisplayOptions {
+  /** Each node's path from its starting guess to its current position. */
+  paths: boolean;
+  /** Line from each demand point to its node. */
+  demandLines: boolean;
+  /** Great-circle arc from each source to each node, width ∝ inbound volume. */
+  sourceLines: boolean;
+}
+
 interface Props {
   points: Point[];
   /** Fixed nodes are only shown when the run will use them. */
   showFixed: boolean;
-  /** A solution to draw, with the points it was solved on (its allocation indexes their demand). */
-  solution?: { solution: Solution; points: Point[] };
+  /** A moment of a search to draw. Its own points are drawn so allocation lines up. */
+  view: FrameView | null;
+  display: DisplayOptions;
 }
 
 const nodeColor = (j: number): RGB => NODE_PALETTE[j % NODE_PALETTE.length];
 
-export default function MapView({ points: currentPoints, showFixed: showFixedParam, solution }: Props) {
-  // While a solution is shown, draw the data it was solved on so allocation colors line up.
-  const points = solution ? solution.points : currentPoints;
-  const showFixed = solution ? false : showFixedParam;
-  const demandAlloc = useMemo(() => {
-    if (!solution) return null;
-    const byPoint = new Map<Point, number>();
-    solution.points
-      .filter((p) => p.type === 'demand')
-      .forEach((p, i) => byPoint.set(p, solution.solution.alloc[i]));
-    return byPoint;
-  }, [solution]);
-  const maxThroughput = useMemo(
-    () => (solution ? Math.max(1, ...solution.solution.nodes.map((n) => n.throughput)) : 1),
-    [solution],
-  );
+interface SourceArc {
+  path: [number, number][];
+  volume: number;
+}
+
+export default function MapView({ points: currentPoints, showFixed: showFixedParam, view, display }: Props) {
+  const points = view ? view.points : currentPoints;
+  const showFixed = view ? false : showFixedParam;
+  const demand = useMemo(() => (view ? view.demand : points.filter((p) => p.type === 'demand')), [view?.demand, points]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const maxVolume = useMemo(
     () => points.reduce((m, p) => (p.type === 'fixed' ? m : Math.max(m, p.volume)), 1),
     [points],
@@ -71,19 +75,77 @@ export default function MapView({ points: currentPoints, showFixed: showFixedPar
   const fitKey = points.length;
   const initialViewState = useMemo(() => fitView(points), [fitKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const nodes = view?.nodes ?? [];
+  const maxThroughput = Math.max(1, ...nodes.map((n) => n.throughput));
+  const alloc = view?.alloc;
+
+  const sourceArcs: SourceArc[] = [];
+  if (view && display.sourceLines) {
+    for (const { point, share } of view.sources) {
+      for (const n of nodes) {
+        if (n.throughput > 0) {
+          sourceArcs.push({ path: greatCirclePath(point.lat, point.lon, n.lat, n.lon), volume: share * n.throughput });
+        }
+      }
+    }
+  }
+  const maxArc = Math.max(1, ...sourceArcs.map((a) => a.volume));
+
   const layers = [
+    new LineLayer<Point>({
+      id: 'demand-lines',
+      data: view && display.demandLines ? demand : [],
+      getSourcePosition: (p) => [p.lon, p.lat],
+      getTargetPosition: (_p, { index }) => {
+        const n = nodes[alloc![index]];
+        return [n.lon, n.lat];
+      },
+      getColor: (_p, { index }) => [...nodeColor(alloc![index]), 70],
+      getWidth: 1,
+      widthUnits: 'pixels',
+      updateTriggers: { getTargetPosition: nodes, getColor: alloc },
+    }),
+    new PathLayer<SourceArc>({
+      id: 'source-arcs',
+      data: sourceArcs,
+      getPath: (a) => a.path,
+      getColor: [...POINT_COLORS.source, 80],
+      getWidth: (a) => 1 + 5 * Math.sqrt(a.volume / maxArc),
+      widthUnits: 'pixels',
+      capRounded: true,
+      jointRounded: true,
+    }),
     new ScatterplotLayer<Point>({
       id: 'demand',
-      data: points.filter((p) => p.type === 'demand'),
+      data: demand,
       getPosition: (p) => [p.lon, p.lat],
       getRadius: (p) => 2 + 10 * Math.sqrt(p.volume / maxVolume),
       radiusUnits: 'pixels',
-      getFillColor: (p) => {
-        const j = demandAlloc?.get(p);
-        return [...(j === undefined ? POINT_COLORS.demand : nodeColor(j)), 150];
-      },
-      updateTriggers: { getFillColor: demandAlloc },
+      getFillColor: (_p, { index }) => [...(alloc ? nodeColor(alloc[index]) : POINT_COLORS.demand), 150],
+      updateTriggers: { getFillColor: alloc },
       pickable: true,
+    }),
+    new PathLayer<{ path: [number, number][]; j: number }>({
+      id: 'trails',
+      data: view && display.paths ? view.trails.map((path, j) => ({ path, j })).filter((d) => !nodes[d.j].fixed) : [],
+      getPath: (d) => d.path,
+      getColor: (d) => [...nodeColor(d.j), 220],
+      getWidth: 2.5,
+      widthUnits: 'pixels',
+      capRounded: true,
+      jointRounded: true,
+    }),
+    new ScatterplotLayer<{ pos: [number, number]; j: number }>({
+      id: 'starts',
+      data: view && display.paths ? view.trails.map((path, j) => ({ pos: path[0], j })).filter((d) => !nodes[d.j].fixed) : [],
+      getPosition: (d) => d.pos,
+      getRadius: 5,
+      radiusUnits: 'pixels',
+      filled: false,
+      stroked: true,
+      getLineColor: (d) => [...nodeColor(d.j), 255],
+      lineWidthUnits: 'pixels',
+      getLineWidth: 2,
     }),
     new ScatterplotLayer<Point>({
       id: 'sources',
@@ -111,9 +173,9 @@ export default function MapView({ points: currentPoints, showFixed: showFixedPar
       getLineWidth: 3,
       pickable: true,
     }),
-    new ScatterplotLayer<NodeStats & { j: number }>({
+    new ScatterplotLayer<NodeView>({
       id: 'nodes',
-      data: solution ? solution.solution.nodes.map((n, j) => ({ ...n, j })) : [],
+      data: nodes,
       getPosition: (n) => [n.lon, n.lat],
       getRadius: (n) => 7 + 13 * Math.sqrt(n.throughput / maxThroughput),
       radiusUnits: 'pixels',
@@ -135,7 +197,7 @@ export default function MapView({ points: currentPoints, showFixed: showFixedPar
         getTooltip={({ object }) => {
           if (!object) return null;
           if ('throughput' in object) {
-            const n = object as NodeStats;
+            const n = object as NodeView;
             return `${n.fixed ? 'Fixed node' : 'Node'}\nThroughput: ${Math.round(n.throughput).toLocaleString()}\n${n.lat.toFixed(3)}, ${n.lon.toFixed(3)}`;
           }
           const p = object as Point;
@@ -147,21 +209,30 @@ export default function MapView({ points: currentPoints, showFixed: showFixedPar
         <BaseMap mapStyle={MAP_STYLE} />
       </DeckGL>
       <div className="legend">
-        {(['demand', 'source', 'fixed'] as const)
-          .filter((t) => t !== 'fixed' || showFixed || solution?.solution.nodes.some((n) => n.fixed))
-          .map((t) => (
-          <div key={t} className="legend-row">
-            <span
-              className={`swatch ${t}`}
-              style={t === 'fixed' ? { borderColor: cssColor(POINT_COLORS[t]) } : { background: cssColor(POINT_COLORS[t]) }}
-            />
-            {t === 'fixed' ? 'Fixed node' : t === 'demand' && solution ? 'Demand (colored by node)' : t[0].toUpperCase() + t.slice(1)}
+        <div className="legend-row">
+          <span className="swatch" style={{ background: cssColor(POINT_COLORS.demand) }} />
+          {view ? 'Demand (colored by node)' : 'Demand'}
+        </div>
+        <div className="legend-row">
+          <span className="swatch" style={{ background: cssColor(POINT_COLORS.source) }} />
+          Source
+        </div>
+        {(showFixed || nodes.some((n) => n.fixed)) && (
+          <div className="legend-row">
+            <span className="swatch fixed" style={{ borderColor: cssColor(POINT_COLORS.fixed) }} />
+            Fixed node
           </div>
-        ))}
-        {solution && (
+        )}
+        {view && (
           <div className="legend-row">
             <span className="swatch node" />
             Node (size = throughput)
+          </div>
+        )}
+        {view && display.paths && (
+          <div className="legend-row">
+            <span className="swatch start" />
+            Starting guess
           </div>
         )}
       </div>

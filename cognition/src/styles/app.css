@@ -224,3 +224,11 @@ code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: v
 .results-table td.muted { color: var(--muted); }
 .results-tab .hint { margin-top: 12px; }
 .swatch.node { background: #888; border: 2px solid #fff; }
+.swatch.start { background: none; border: 2px solid #aaa; width: 10px; height: 10px; }
+.transport, .display-toggles { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.transport .play { width: 34px; }
+.scrubber { flex: 1; min-width: 120px; accent-color: var(--accent); padding: 0; background: none; border: none; }
+.iteration { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 120px; }
+.toggle { display: flex; align-items: center; gap: 4px; color: #c0c0c8; cursor: pointer; }
+.toggle input { accent-color: var(--accent); }
+.display-toggles { gap: 14px; }
