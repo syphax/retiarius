@@ -27,6 +27,7 @@ This is the **Distribution SCimulator** (codename: Retiarius) — a distribution
 │   ├── flow_viz/                # Flow visualization (Deck.GL + MapLibre)
 │   ├── data/                    # Shared input data (CSVs, gitignored)
 │   └── utilities/               # Utility scripts
+├── cognition/                   # Center-of-gravity app (in-browser, Vite + React + TS)
 └── retiarius-private/           # Private submodule (separate repo)
     └── prompts/                 # Design specs and prompts
 ```

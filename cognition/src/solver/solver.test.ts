@@ -1,0 +1,138 @@
+import { describe, expect, it } from 'vitest';
+import type { Point } from '../data/types';
+import { DEFAULT_PARAMS, type Params } from '../params';
+import { buildModel } from './model';
+import { DEFAULT_OPTIONS, mulberry32, solveN, sweep } from './solve';
+import { angle, toLatLon, toVec } from './sphere';
+
+const pt = (type: Point['type'], lat: number, lon: number, volume = 1): Point => ({ type, lat, lon, volume, rows: [] });
+const params = (o: Partial<Params> = {}): Params => ({ ...DEFAULT_PARAMS, ...o });
+const miles = (a: [number, number], b: [number, number]) => angle(toVec(...a), toVec(...b)) * 3958.8;
+
+/** Random US-ish demand cloud. */
+function cloud(n: number, seed = 3): Point[] {
+  const r = mulberry32(seed);
+  return Array.from({ length: n }, () => pt('demand', 26 + r() * 22, -122 + r() * 50, 1 + Math.floor(r() * 100)));
+}
+
+describe('sphere', () => {
+  it('round-trips lat/lon', () => {
+    const [lat, lon] = toLatLon(toVec(39.5, -119.8));
+    expect(lat).toBeCloseTo(39.5, 9);
+    expect(lon).toBeCloseTo(-119.8, 9);
+  });
+
+  it('matches a known great-circle distance (LAX–JFK ≈ 2475 mi)', () => {
+    expect(Math.abs(miles([33.9425, -118.4081], [40.6398, -73.7789]) - 2475)).toBeLessThan(10);
+  });
+});
+
+describe('single node', () => {
+  it('lands at the center of a symmetric set', () => {
+    const pts = [pt('demand', 39, -101), pt('demand', 39, -99), pt('demand', 41, -101), pt('demand', 41, -99)];
+    const s = solveN(buildModel(pts, params({ circuity: 1 })), 1);
+    // On a sphere the 39°/41° "square" is narrower in the north, so the true median is ~40.019°N.
+    expect(miles([s.nodes[0].lat, s.nodes[0].lon], [40.019, -100])).toBeLessThan(0.5);
+  });
+
+  it('sits on a point that outweighs all others combined (geometric median, not mean)', () => {
+    const pts = [pt('demand', 40, -100, 10), pt('demand', 35, -90, 3), pt('demand', 45, -110, 3)];
+    const s = solveN(buildModel(pts, params()), 1);
+    expect(miles([s.nodes[0].lat, s.nodes[0].lon], [40, -100])).toBeLessThan(1);
+  });
+
+  it('is pulled toward sources, more strongly as the inbound ratio rises', () => {
+    const pts = [...cloud(200), pt('source', 40.7, -74.0, 1)];
+    const dist = (ratio: number) => {
+      const s = solveN(buildModel(pts, params({ inboundRatio: ratio })), 1);
+      return miles([s.nodes[0].lat, s.nodes[0].lon], [40.7, -74.0]);
+    };
+    const [d0, d1, d3] = [dist(0), dist(0.5), dist(3)];
+    expect(d1).toBeLessThan(d0);
+    expect(d3).toBeLessThan(d1);
+    expect(d3).toBeLessThan(1); // inbound dominates: sit on the source
+  });
+});
+
+describe('costs and metrics', () => {
+  it('has no inbound cost without sources, and ignores the ratio', () => {
+    const s = solveN(buildModel(cloud(100), params({ inboundRatio: 5 })), 3);
+    expect(s.metrics.inboundCost).toBe(0);
+    expect(s.metrics.totalCost).toBeCloseTo(s.metrics.outboundCost, 6);
+  });
+
+  it('normalizes supply so inbound volume equals demand volume', () => {
+    const base = [...cloud(100), pt('source', 34, -118, 1)];
+    const big = [...cloud(100), pt('source', 34, -118, 1e6)];
+    const a = solveN(buildModel(base, params()), 2);
+    const b = solveN(buildModel(big, params()), 2);
+    expect(b.metrics.inboundCost).toBeCloseTo(a.metrics.inboundCost, 6);
+  });
+
+  it('reports consistent metrics', () => {
+    const m = buildModel(cloud(150), params({ serviceDistance: 1e6 }));
+    const s = solveN(m, 4);
+    expect(s.metrics.pctWithin).toBe(1);
+    expect(s.metrics.avgDistance).toBeCloseTo(s.metrics.outboundCost / m.totalDemand, 6);
+    expect(s.nodes.reduce((t, n) => t + n.throughput, 0)).toBeCloseTo(m.totalDemand, 6);
+    expect(s.frames.at(-1)!.totalCost).toBeCloseTo(s.metrics.totalCost, 3);
+  });
+
+  it('scales cost with circuity but leaves node locations unchanged', () => {
+    const pts = cloud(120);
+    const a = solveN(buildModel(pts, params({ circuity: 1 })), 3);
+    const b = solveN(buildModel(pts, params({ circuity: 1.2 })), 3);
+    expect(b.metrics.totalCost / a.metrics.totalCost).toBeCloseTo(1.2, 6);
+    expect(b.nodes.map((n) => n.lat)).toEqual(a.nodes.map((n) => n.lat));
+  });
+});
+
+describe('sweep', () => {
+  const pts = [...cloud(400), pt('source', 33.75, -118.2, 2), pt('source', 40.7, -74.1, 1)];
+
+  it('cost falls as N rises, and later N are warm-started', () => {
+    const sols = sweep(buildModel(pts, params()), 1, 8);
+    expect(sols.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    for (let i = 1; i < sols.length; i++) {
+      expect(sols[i].metrics.totalCost).toBeLessThanOrEqual(sols[i - 1].metrics.totalCost * (1 + 1e-9));
+    }
+    expect(sols.slice(1).some((s) => s.warmStarted)).toBe(true);
+  });
+
+  it('never moves fixed nodes, counts them in N, and starts at N = #fixed', () => {
+    const fixed = [pt('fixed', 32.79, -96.8, 0), pt('fixed', 39.49, -119.74, 0)];
+    const m = buildModel([...pts, ...fixed], params({ useFixedNodes: true }));
+    const sols = sweep(m, 1, 5);
+    expect(sols.map((s) => s.n)).toEqual([2, 3, 4, 5]);
+    for (const s of sols) {
+      expect(s.nodes).toHaveLength(s.n);
+      expect(s.nodes.filter((n) => n.fixed)).toHaveLength(2);
+      expect(s.nodes[0].lat).toBeCloseTo(32.79, 9);
+      expect(s.nodes[1].lon).toBeCloseTo(-119.74, 9);
+      for (const f of s.frames) expect(f.nodes[0][0]).toBeCloseTo(32.79, 9);
+    }
+  });
+
+  it('ignores fixed rows when fixed nodes are off', () => {
+    const m = buildModel([...pts, pt('fixed', 32.79, -96.8, 0)], params({ useFixedNodes: false }));
+    expect(sweep(m, 1, 2).map((s) => s.nodes.some((n) => n.fixed))).toEqual([false, false]);
+  });
+
+  it('records a search that starts at the initial guess and improves', () => {
+    const s = solveN(buildModel(pts, params()), 5);
+    expect(s.frames.length).toBeGreaterThan(2);
+    expect(s.frames.at(-1)!.totalCost).toBeLessThanOrEqual(s.frames[0].totalCost);
+  });
+
+  it('is reproducible for a given seed', () => {
+    const m = buildModel(pts, params());
+    expect(solveN(m, 4).metrics.totalCost).toBe(solveN(m, 4).metrics.totalCost);
+  });
+
+  it('is fast enough for ~900 points', () => {
+    const m = buildModel([...cloud(900, 11), pt('source', 33.75, -118.2)], params());
+    const t = performance.now();
+    sweep(m, 1, 10, DEFAULT_OPTIONS);
+    expect(performance.now() - t).toBeLessThan(5000);
+  });
+});
