@@ -232,3 +232,22 @@ code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: v
 .toggle { display: flex; align-items: center; gap: 4px; color: #c0c0c8; cursor: pointer; }
 .toggle input { accent-color: var(--accent); }
 .display-toggles { gap: 14px; }
+
+/* Results tab (milestone 4) */
+.results-tab { display: flex; flex-direction: column; gap: 20px; padding: 16px 20px 32px; }
+.results-tab h2 { font-size: 14px; margin-bottom: 8px; }
+.results-tab h2 small, .chart-card h3 small { font-weight: 400; color: var(--muted); margin-left: 6px; }
+.results-table th.left, .results-table td.left { text-align: left; }
+.results-table td .muted, .muted { color: var(--muted); }
+.results-table td.actions { display: flex; gap: 4px; justify-content: flex-end; }
+.runs-table tbody tr { cursor: pointer; }
+.runs-table tbody tr.selected { background: rgba(0, 200, 255, 0.08); }
+.run-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; }
+.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
+.chart-card { background: var(--panel-solid); border: 1px solid var(--border); border-radius: 6px; padding: 12px 12px 4px; min-width: 0; }
+.chart-card.wide { grid-column: 1 / -1; }
+.chart-card h3 { font-size: 13px; margin-bottom: 8px; }
+.run-label { color: #c0c0c8; }
+.run-label b { color: var(--text); }
+.rerun { background: rgba(0, 200, 255, 0.1); border-color: rgba(0, 200, 255, 0.4); }

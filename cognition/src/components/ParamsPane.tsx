@@ -10,6 +10,9 @@ interface Props {
   /** Data or parameters changed since the results on screen were computed. */
   stale: boolean;
   onRunAll: () => void;
+  /** The solution on the map, which an ad-hoc re-run would start from. */
+  rerunFrom: { label: string; n: number } | null;
+  onRerun: () => void;
 }
 
 function NumberField({
@@ -50,7 +53,7 @@ function NumberField({
   );
 }
 
-export default function ParamsPane({ params, onChange, validation, running, stale, onRunAll }: Props) {
+export default function ParamsPane({ params, onChange, validation, running, stale, onRunAll, rerunFrom, onRerun }: Props) {
   const [open, setOpen] = useState(true);
   const [advanced, setAdvanced] = useState(false);
   const set = <K extends keyof Params>(k: K, v: Params[K]) => onChange({ ...params, [k]: v });
@@ -160,6 +163,16 @@ export default function ParamsPane({ params, onChange, validation, running, stal
           </div>
         ))}
         {stale && !running && <div className="warn">Data or parameters changed since the last run.</div>}
+        {rerunFrom && (
+          <button
+            className="rerun"
+            disabled={counts.demand === 0 || running}
+            onClick={onRerun}
+            title="Solve this one N again with the current data and parameters, starting from the solution on the map"
+          >
+            Re-run N = {rerunFrom.n} from {rerunFrom.label}
+          </button>
+        )}
         <button className="primary run-all" disabled={problems.length > 0 || running} onClick={onRunAll}>
           {running ? 'Running…' : 'Run All Scenarios'}
         </button>

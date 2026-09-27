@@ -1,11 +1,11 @@
 import type { FrameView } from '../playback/frameView';
 import type { usePlayback } from '../playback/usePlayback';
-import type { SweepState } from '../solver/useSweep';
+import type { Run } from '../runs/useRuns';
 import { fmtCost, fmtDist, fmtPct } from '../utils/format';
 import type { DisplayOptions } from './MapView';
 
 interface Props {
-  sweep: SweepState;
+  run: Run | undefined;
   view: FrameView | null;
   player: ReturnType<typeof usePlayback>;
   display: DisplayOptions;
@@ -16,31 +16,38 @@ interface Props {
 const SPEEDS = [0.5, 1, 2, 4];
 
 /** Bottom strip on the map: pick N, play the search, toggle layers, see metrics. */
-export default function SolutionBar({ sweep, view, player, display, onDisplay, onCancel }: Props) {
-  if (sweep.status === 'idle') return null;
+export default function SolutionBar({ run, view, player, display, onDisplay, onCancel }: Props) {
+  if (!run) return null;
   const { playback } = player;
-  const units = sweep.params?.units ?? 'mi';
-  const band = sweep.params ? `${sweep.params.serviceDistance} ${units}` : '';
-  const lastN = sweep.solutions.at(-1)?.n;
+  const units = run.params.units;
+  const band = `${run.params.serviceDistance} ${units}`;
+  const lastN = run.solutions.at(-1)?.n;
   const atEnd = view ? view.iteration === view.iterations && playback.t >= view.iterations : false;
   const toggle = (k: keyof DisplayOptions) => onDisplay({ ...display, [k]: !display[k] });
 
   return (
     <div className="solution-bar">
+      <div className="run-label">
+        <b>{run.label}</b>
+        {run.base && ` · from ${run.base.runLabel}, N = ${run.base.solution.n}`} · {run.detail}
+      </div>
       <div className="n-chips">
         <span className="label">N</span>
-        {sweep.solutions.map((s) => (
+        {run.solutions.map((s) => (
           <button key={s.n} className={s.n === playback.n ? 'chip active' : 'chip'} onClick={() => player.select(s.n)}>
             {s.n}
           </button>
         ))}
-        {sweep.status === 'running' && (
+        {run.status === 'running' && (
           <>
-            <span className="solving">Solving N = {lastN === undefined ? '…' : lastN + 1}…</span>
+            <span className="solving">
+              Solving N = {run.kind === 'adhoc' ? run.base!.solution.n : lastN === undefined ? '…' : lastN + 1}…
+            </span>
             <button onClick={onCancel}>Cancel</button>
           </>
         )}
-        {sweep.status === 'error' && <span className="error">{sweep.error}</span>}
+        {run.status === 'error' && <span className="error">{run.error}</span>}
+        {run.status === 'cancelled' && <span className="warn">cancelled</span>}
       </div>
 
       {view && (
@@ -71,10 +78,10 @@ export default function SolutionBar({ sweep, view, player, display, onDisplay, o
               </option>
             ))}
           </select>
-          <label className="toggle" title="After each N, continue to the next">
+          {run.kind === 'sweep' && <label className="toggle" title="After each N, continue to the next">
             <input type="checkbox" checked={playback.playAll} onChange={(e) => player.setPlayAll(e.target.checked)} />
             All N
-          </label>
+          </label>}
         </div>
       )}
 

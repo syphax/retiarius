@@ -69,14 +69,17 @@ export function usePlayback(solutions: Solution[], sweepRunning: boolean) {
     return () => cancelAnimationFrame(raf);
   }, [state.playing, update]);
 
-  const endOf = (n: number) => (live.current.solutions.find((s) => s.n === n)?.frames.length ?? 1) - 1;
+  const endOf = (n: number, sols = live.current.solutions) => (sols.find((s) => s.n === n)?.frames.length ?? 1) - 1;
 
   return {
     playback: state,
     /** Start playing a new sweep from its first N as results arrive. */
     startSweep: useCallback(() => update({ n: null, t: 0, playing: true, playAll: true }), [update]),
-    /** Jump to N's final positions. */
-    select: useCallback((n: number) => update({ n, t: endOf(n), playing: false }), [update]), // eslint-disable-line react-hooks/exhaustive-deps
+    /**
+     * Jump to N's final positions. Pass `solutions` when switching runs in the same event, before
+     * the new run's solutions reach this hook.
+     */
+    select: useCallback((n: number, solutions?: Solution[]) => update({ n, t: endOf(n, solutions), playing: false }), [update]), // eslint-disable-line react-hooks/exhaustive-deps
     togglePlay: useCallback(() => {
       const s = live.current.state;
       if (s.playing) return update({ playing: false });

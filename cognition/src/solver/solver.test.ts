@@ -135,4 +135,31 @@ describe('sweep', () => {
     sweep(m, 1, 10, DEFAULT_OPTIONS);
     expect(performance.now() - t).toBeLessThan(5000);
   });
+
+  it('re-solves one N warm-started from an earlier solution with new parameters (ad-hoc re-run)', () => {
+    const base = solveN(buildModel(pts, params({ inboundRatio: 0.4 })), 5);
+    const warm = base.nodes.filter((n) => !n.fixed).map((n) => toVec(n.lat, n.lon));
+    const m = buildModel(pts, params({ inboundRatio: 2 }));
+    const re = solveN(m, 5, { ...DEFAULT_OPTIONS, restarts: 3 }, warm);
+    expect(re.n).toBe(5);
+    expect(re.warmStarted).toBe(true);
+    re.frames[0].nodes.forEach(([lat, lon], j) => {
+      // Starts where the base ended.
+      expect(lat).toBeCloseTo(base.nodes[j].lat, 9);
+      expect(lon).toBeCloseTo(base.nodes[j].lon, 9);
+    });
+    // A higher inbound ratio pulls the network toward the sources.
+    const toSources = (s: typeof re) =>
+      s.nodes.reduce((t, n) => t + n.throughput * Math.min(miles([n.lat, n.lon], [33.75, -118.2]), miles([n.lat, n.lon], [40.7, -74.1])), 0);
+    expect(toSources(re)).toBeLessThan(toSources(base));
+  });
+
+  it('adds fixed nodes in a re-run by trimming the warm start to fit N', () => {
+    const base = solveN(buildModel(pts, params()), 4);
+    const warm = base.nodes.map((n) => toVec(n.lat, n.lon));
+    const m = buildModel([...pts, pt('fixed', 32.79, -96.8, 0)], params({ useFixedNodes: true }));
+    const re = solveN(m, 4, DEFAULT_OPTIONS, warm);
+    expect(re.nodes).toHaveLength(4);
+    expect(re.nodes.filter((n) => n.fixed)).toHaveLength(1);
+  });
 });

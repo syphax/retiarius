@@ -10,7 +10,7 @@ import MapView, { type DisplayOptions } from './components/MapView';
 import DataTab from './components/DataTab';
 import ResultsTab from './components/ResultsTab';
 import SolutionBar from './components/SolutionBar';
-import { useSweep } from './solver/useSweep';
+import { useRuns } from './runs/useRuns';
 import { buildModel } from './solver/model';
 import { usePlayback } from './playback/usePlayback';
 import { useFrameView } from './playback/frameView';
@@ -30,22 +30,34 @@ export default function App() {
 
   const validation = useMemo(() => (gaz ? validate(rows, gaz) : EMPTY_VALIDATION), [rows, gaz]);
 
-  const { sweep, runSweep, cancelSweep } = useSweep();
-  const player = usePlayback(sweep.solutions, sweep.status === 'running');
-  const selected = sweep.solutions.find((s) => s.n === player.playback.n);
-  const sweepModel = useMemo(
-    () => (sweep.params ? buildModel(sweep.points, sweep.params) : null),
-    [sweep.points, sweep.params],
-  );
-  const view = useFrameView(sweepModel, sweep.points, selected, player.playback.t);
+  const { runs, active, setActive, runSweep, runAdhoc, cancel, remove, toggleChart } = useRuns();
+  const player = usePlayback(active?.solutions ?? [], active?.status === 'running');
+  const selected = active?.solutions.find((s) => s.n === player.playback.n);
+  const activeModel = useMemo(() => (active ? buildModel(active.points, active.params) : null), [active?.points, active?.params]); // eslint-disable-line react-hooks/exhaustive-deps
+  const view = useFrameView(activeModel, active?.points ?? [], selected, player.playback.t);
   const [display, setDisplay] = useState<DisplayOptions>({ paths: true, demandLines: true, sourceLines: true });
+  const running = runs.some((r) => r.status === 'running');
   const stale =
-    sweep.status !== 'idle' &&
-    (sweep.points !== validation.points || JSON.stringify(sweep.params) !== JSON.stringify(params));
+    !!active &&
+    (active.points !== validation.points ||
+      JSON.stringify({ ...active.params, minNodes: 0, maxNodes: 0 }) !==
+        JSON.stringify({ ...params, minNodes: 0, maxNodes: 0 }));
 
   const runAll = () => {
     runSweep(validation.points, params);
     player.startSweep();
+  };
+
+  const rerun = () => {
+    if (!active || !selected) return;
+    runAdhoc(active, selected, validation.points, params);
+    player.startSweep();
+  };
+
+  const showOnMap = (runId: number, n: number) => {
+    setActive(runId);
+    player.select(n, runs.find((r) => r.id === runId)?.solutions);
+    setTab('map');
   };
 
   const onImport = (newRows: RawRow[], name: string) => {
@@ -81,17 +93,19 @@ export default function App() {
               params={params}
               onChange={setParams}
               validation={validation}
-              running={sweep.status === 'running'}
+              running={running}
               stale={stale}
               onRunAll={runAll}
+              rerunFrom={active && selected && active.status !== 'running' ? { label: active.label, n: selected.n } : null}
+              onRerun={rerun}
             />
             <SolutionBar
-              sweep={sweep}
+              run={active}
               view={view}
               player={player}
               display={display}
               onDisplay={setDisplay}
-              onCancel={cancelSweep}
+              onCancel={cancel}
             />
             {rows.length === 0 && (
               <div className="empty-hint">
@@ -108,11 +122,11 @@ export default function App() {
         )}
         {tab === 'results' && (
           <ResultsTab
-            sweep={sweep}
-            onShowOnMap={(n) => {
-              player.select(n);
-              setTab('map');
-            }}
+            runs={runs}
+            activeId={active?.id}
+            onShowOnMap={showOnMap}
+            onToggleChart={toggleChart}
+            onRemove={remove}
           />
         )}
       </main>
