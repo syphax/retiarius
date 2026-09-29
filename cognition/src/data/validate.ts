@@ -17,8 +17,19 @@ function parseNumber(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Blank means active, so files without an Active column include every row. */
+export function parseActive(s: string): boolean | null {
+  const v = s.trim().toLowerCase();
+  if (['', 'true', 'yes', 'y', '1', 'x'].includes(v)) return true;
+  if (['false', 'no', 'n', '0'].includes(v)) return false;
+  return null;
+}
+
 function validateRow(row: RawRow, index: number, gaz: Gazetteer): ValidRow | string[] {
   const problems: string[] = [];
+
+  const active = parseActive(row.active);
+  if (active === null) problems.push('active must be TRUE or FALSE');
 
   const type = row.type.trim().toLowerCase() as RowType;
   if (!ROW_TYPES.includes(type)) problems.push(`type must be one of ${ROW_TYPES.join(', ')}`);
@@ -53,7 +64,7 @@ function validateRow(row: RawRow, index: number, gaz: Gazetteer): ValidRow | str
   }
 
   if (problems.length || !geo) return problems;
-  return { index, type, volume, ...geo };
+  return { index, type, volume, active: active ?? true, ...geo };
 }
 
 /** Merge valid rows of the same type at the same location into one point. */
@@ -75,11 +86,17 @@ export function aggregate(rows: ValidRow[]): Point[] {
 export function validate(rows: RawRow[], gaz: Gazetteer): ValidationResult {
   const valid: ValidRow[] = [];
   const issues = new Map<number, string[]>();
+  const inactive = new Set<number>();
+  let flagged = 0;
   rows.forEach((row, i) => {
     if (Object.values(row).every((v) => v.trim() === '')) return; // blank grid rows are ignored
+    const isActive = parseActive(row.active) !== false;
+    if (!isActive) inactive.add(i);
     const r = validateRow(row, i, gaz);
-    if (Array.isArray(r)) issues.set(i, r);
-    else valid.push(r);
+    if (Array.isArray(r)) {
+      issues.set(i, r);
+      if (isActive) flagged++;
+    } else valid.push(r);
   });
-  return { valid, issues, points: aggregate(valid) };
+  return { valid, issues, flagged, inactive, points: aggregate(valid.filter((r) => r.active)) };
 }

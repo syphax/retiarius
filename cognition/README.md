@@ -17,12 +17,15 @@ Hard column names (case-insensitive; spaces/dashes become underscores). Extra co
 
 | column | notes |
 |---|---|
-| `type` | `demand`, `source`, or `fixed` (existing node) |
-| `volume` | positive number; ignored for `fixed` |
-| `lat`, `lon` | preferred when set |
-| `postal_code`, `postal_code_type` | `zip5` or `zip3`; leading zeros restored, ZIP+4 truncated |
+| `Type` | `demand`, `source`, or `fixed` (existing node) |
+| `Volume` | positive number; ignored for `fixed` |
+| `Lat`, `Lon` | preferred when set; otherwise geocoded values are shown in gray italics |
+| `Postal Code`, `Postal Code Type` | `zip5` or `zip3`; leading zeros restored, ZIP+4 truncated |
+| `Active` | optional; TRUE/FALSE (also yes/no, 1/0, x); blank = active |
 
-Rows that fail validation are flagged in the Data tab and excluded from runs.
+Rows that fail validation are flagged in the Data tab and excluded from runs. Inactive rows are
+validated but excluded from runs and the map. The Data tab filters by Type and Active; edits and
+fill down apply only to the rows shown.
 
 ## Geo data
 

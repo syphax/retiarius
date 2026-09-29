@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { loadGazetteer, type Gazetteer } from './data/geo';
 import { parseText } from './data/parse';
-import type { RawRow, ValidationResult } from './data/types';
+import { EMPTY_VALIDATION, type RawRow } from './data/types';
 import { validate } from './data/validate';
 import { DEFAULT_PARAMS, type Params } from './params';
 import TopBar, { type Tab } from './components/TopBar';
@@ -15,7 +15,6 @@ import { buildModel } from './solver/model';
 import { usePlayback } from './playback/usePlayback';
 import { useFrameView } from './playback/frameView';
 
-const EMPTY_VALIDATION: ValidationResult = { valid: [], issues: new Map(), points: [] };
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('map');
@@ -76,7 +75,7 @@ export default function App() {
         tab={tab}
         onTab={setTab}
         datasetName={datasetName}
-        flaggedCount={validation.issues.size}
+        flaggedCount={validation.flagged}
         onImport={onImport}
         onLoadSample={loadSample}
       />

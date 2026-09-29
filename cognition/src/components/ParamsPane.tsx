@@ -185,7 +185,8 @@ export default function ParamsPane({ params, onChange, validation, running, stal
       <div className="pane-footer">
         <div className="data-summary">
           {counts.demand} demand · {counts.source} source · {counts.fixed} fixed
-          {validation.issues.size > 0 && <span className="warn"> · {validation.issues.size} flagged rows excluded</span>}
+          {validation.flagged > 0 && <span className="warn"> · {validation.flagged} flagged rows excluded</span>}
+          {validation.inactive.size > 0 && <span> · {validation.inactive.size} inactive</span>}
         </div>
         {problems.map((p) => (
           <div key={p} className="error">

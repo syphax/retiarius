@@ -3,7 +3,8 @@ import * as XLSX from 'xlsx';
 import type { Gazetteer } from './geo';
 import { normalizePostal } from './geo';
 import { ImportError, parseText, parseWorkbook, sheetsCsvUrl } from './parse';
-import { validate } from './validate';
+import { parseActive, validate } from './validate';
+import { NO_FILTER, fillDown, setActive, visibleRows } from './gridOps';
 
 const gaz: Gazetteer = {
   zip5: new Map([
@@ -20,7 +21,7 @@ describe('parse', () => {
   it('parses tab-separated paste with messy headers and ignores extra columns', () => {
     const rows = parseText('Type\tVolume\tPostal Code\tpostal-code-type\tnotes\ndemand\t10\t601\tzip5\thello');
     expect(rows).toEqual([
-      { type: 'demand', volume: '10', lat: '', lon: '', postal_code: '601', postal_code_type: 'zip5' },
+      { type: 'demand', volume: '10', lat: '', lon: '', postal_code: '601', postal_code_type: 'zip5', active: '' },
     ]);
   });
 
@@ -67,7 +68,7 @@ describe('normalizePostal', () => {
 
 describe('validate', () => {
   const row = (o: Partial<Record<string, string>>) => ({
-    type: '', volume: '', lat: '', lon: '', postal_code: '', postal_code_type: '', ...o,
+    type: '', volume: '', lat: '', lon: '', postal_code: '', postal_code_type: '', active: '', ...o,
   });
 
   it('geocodes, prefers lat/lon, and flags bad rows', () => {
@@ -106,5 +107,61 @@ describe('validate', () => {
     );
     expect(r.points).toHaveLength(2);
     expect(r.points[0]).toMatchObject({ type: 'demand', volume: 5, rows: [0, 1] });
+  });
+});
+
+describe('active column', () => {
+  const row = (o: Partial<Record<string, string>>) => ({
+    type: 'demand', volume: '1', lat: '', lon: '', postal_code: '100', postal_code_type: 'zip3', active: '', ...o,
+  });
+
+  it('parses active values; blank = active', () => {
+    expect(['', 'TRUE', 'yes', 'Y', '1', 'x'].map(parseActive)).toEqual([true, true, true, true, true, true]);
+    expect(['FALSE', 'no', 'n', '0'].map(parseActive)).toEqual([false, false, false, false]);
+    expect(parseActive('maybe')).toBeNull();
+  });
+
+  it('geocodes inactive rows but leaves them out of points and the flagged count', () => {
+    const r = validate(
+      [row({}), row({ active: 'FALSE' }), row({ active: 'FALSE', postal_code: '999' }), row({ postal_code: '999' }), row({ active: 'maybe' })],
+      gaz,
+    );
+    expect(r.valid.map((v) => [v.index, v.active])).toEqual([[0, true], [1, false]]);
+    expect(r.points).toHaveLength(1);
+    expect(r.points[0].rows).toEqual([0]);
+    expect([...r.inactive]).toEqual([1, 2]);
+    expect([...r.issues.keys()]).toEqual([2, 3, 4]);
+    expect(r.flagged).toBe(2); // row 2 is inactive
+  });
+
+  it('imports an Active column', () => {
+    expect(parseText('Type,Volume,Lat,Lon,Active\ndemand,1,40,-100,FALSE')[0].active).toBe('FALSE');
+  });
+});
+
+describe('grid ops', () => {
+  const r = (type: string, active = '', postal_code = '') => ({
+    type, volume: '1', lat: '', lon: '', postal_code, postal_code_type: '', active,
+  });
+  const rows = [r('demand'), r('source'), r('demand', 'FALSE'), r('fixed'), r('bogus'), r('demand', 'no')];
+
+  it('filters by type and active', () => {
+    expect(visibleRows(rows, NO_FILTER)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(visibleRows(rows, { types: new Set(['demand']), active: 'all' })).toEqual([0, 2, 5]);
+    expect(visibleRows(rows, { types: new Set(['demand']), active: 'active' })).toEqual([0]);
+    expect(visibleRows(rows, { types: new Set(['other', 'fixed']), active: 'all' })).toEqual([3, 4]);
+    expect(visibleRows(rows, { types: new Set(), active: 'inactive' })).toEqual([2, 5]);
+  });
+
+  it('fills down only through visible rows', () => {
+    const src = rows.map((x, i) => ({ ...x, postal_code: String(i) }));
+    const view = [0, 2, 5]; // filtered to demand
+    const next = fillDown(src, view, { x: 4, y: 0, width: 1, height: 3 })!; // postal_code column
+    expect(next.map((x) => x.postal_code)).toEqual(['0', '1', '0', '3', '4', '0']);
+    expect(fillDown(src, view, { x: 4, y: 0, width: 1, height: 1 })).toBeNull();
+  });
+
+  it('sets active on listed rows', () => {
+    expect(setActive(rows, [0, 2], false).map((x) => x.active)).toEqual(['FALSE', '', 'FALSE', '', '', 'no']);
   });
 });

@@ -90,7 +90,7 @@ export default function TopBar({ tab, onTab, datasetName, flaggedCount, onImport
               <textarea
                 autoFocus
                 rows={12}
-                placeholder={'Include the header row, e.g.\ntype\tvolume\tlat\tlon\tpostal_code\tpostal_code_type'}
+                placeholder={'Include the header row, e.g.\nType\tVolume\tLat\tLon\tPostal Code\tPostal Code Type\tActive'}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
               />
@@ -109,9 +109,10 @@ export default function TopBar({ tab, onTab, datasetName, flaggedCount, onImport
               </>
             )}
             <p className="hint">
-              Required columns: <code>type</code> (demand / source / fixed), <code>volume</code>, and either{' '}
-              <code>lat</code> + <code>lon</code> or <code>postal_code</code> + <code>postal_code_type</code> (zip5 /
-              zip3). Other columns are ignored. Importing replaces the current data.
+              Required columns: <code>Type</code> (demand / source / fixed), <code>Volume</code>, and either{' '}
+              <code>Lat</code> + <code>Lon</code> or <code>Postal Code</code> + <code>Postal Code Type</code> (zip5 /
+              zip3). Optional: <code>Active</code> (TRUE / FALSE; blank = active). Header case doesn't matter; other
+              columns are ignored. Importing replaces the current data.
             </p>
             {error && <div className="error">{error}</div>}
             <div className="modal-actions">
