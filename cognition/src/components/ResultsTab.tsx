@@ -191,7 +191,10 @@ function SweepTable({ run, onShowOnMap }: { run: Run; onShowOnMap: (runId: numbe
             <td>{fmtDist(s.metrics.avgDistance, units)}</td>
             <td>{fmtPct(s.metrics.pctWithin)}</td>
             {sources.length > 1 && <td>{sharesText(s.metrics.sourceShares)}</td>}
-            <td className="muted">{s.warmStarted ? `warm (best of ${s.runs})` : `cold (best of ${s.runs})`}</td>
+            <td className="muted" title="Warm = continued from the previous N; cold = fresh random start. Moves = node relocations kept by the polish pass.">
+              {s.warmStarted ? 'warm' : 'cold'}
+              {s.polishMoves > 0 && ` + ${s.polishMoves} move${s.polishMoves > 1 ? 's' : ''}`} (best of {s.runs})
+            </td>
             <td>
               <button onClick={() => onShowOnMap(run.id, s.n)}>Map</button>
             </td>

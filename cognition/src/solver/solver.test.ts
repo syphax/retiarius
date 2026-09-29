@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Point } from '../data/types';
 import { DEFAULT_PARAMS, type Params } from '../params';
 import { buildModel } from './model';
-import { DEFAULT_OPTIONS, mulberry32, solveN, sweep } from './solve';
+import { DEFAULT_OPTIONS, locationAllocation, mulberry32, polish, polishBudget, seedNodes, solveN, sweep } from './solve';
 import { angle, toLatLon, toVec } from './sphere';
 
 const pt = (type: Point['type'], lat: number, lon: number, volume = 1): Point => ({ type, lat, lon, volume, rows: [] });
@@ -213,6 +213,66 @@ describe('inbound sourcing blend', () => {
     const a = solveN(buildModel(pts, params()), 3);
     const b = solveN(at(1), 3);
     expect(b.metrics.totalCost).toBe(a.metrics.totalCost);
+  });
+});
+
+describe('polish pass', () => {
+  // Clustered demand (metro areas) has the local optima the alternating heuristic gets stuck in.
+  function metros(seed: number): Point[] {
+    const r = mulberry32(seed);
+    const centers = Array.from({ length: 9 }, () => [28 + r() * 18, -120 + r() * 46]);
+    return Array.from({ length: 450 }, (_, i) => {
+      const [lat, lon] = centers[i % centers.length];
+      return pt('demand', lat + (r() - 0.5) * 3, lon + (r() - 0.5) * 3, 1 + Math.floor(r() * 50));
+    });
+  }
+  const noPolish = { ...DEFAULT_OPTIONS, polishAttempts: 0 };
+
+  it('never makes a run worse, and escapes local optima on clustered data', () => {
+    let improved = 0;
+    let runs = 0;
+    for (const seed of [1, 2, 3]) {
+      const m = buildModel([...metros(seed), pt('source', 33.75, -118.2)], params());
+      const rand = mulberry32(seed);
+      for (const n of [3, 5, 7]) {
+        for (let r = 0; r < 4; r++) {
+          const run = locationAllocation(m, seedNodes(m, n, rand, []), DEFAULT_OPTIONS);
+          const p = polish(m, run, DEFAULT_OPTIONS);
+          expect(p.cost).toBeLessThanOrEqual(run.cost);
+          runs++;
+          if (p.cost < run.cost * (1 - 1e-4)) improved++;
+        }
+      }
+    }
+    expect(improved).toBeGreaterThan(runs / 4); // plain runs get stuck often enough to matter
+  });
+
+  it('keeps sweeps within the continuity tolerance of unpolished results, or better', () => {
+    const m = buildModel([...metros(1), pt('source', 33.75, -118.2)], params());
+    const plain = sweep(m, 1, 7, noPolish);
+    sweep(m, 1, 7).forEach((s, i) => {
+      expect(s.metrics.totalCost).toBeLessThanOrEqual(plain[i].metrics.totalCost * (1 + DEFAULT_OPTIONS.continuityTolerance));
+    });
+  });
+
+  it('appends kept moves to the playback and keeps fixed nodes still', () => {
+    const fixed = pt('fixed', 39.1, -94.6, 0);
+    const m = buildModel([...metros(2), fixed], params({ useFixedNodes: true }));
+    const sols = sweep(m, 1, 7);
+    const moved = sols.find((s) => s.polishMoves > 0);
+    expect(moved).toBeDefined();
+    for (const s of sols) {
+      expect(s.frames.at(-1)!.totalCost).toBeCloseTo(s.metrics.totalCost, 3);
+      for (const f of s.frames) expect(f.nodes[0][0]).toBeCloseTo(39.1, 9);
+    }
+  });
+
+  it('scales its attempt budget down for large datasets', () => {
+    const small = buildModel(cloud(500), params());
+    const big = buildModel(cloud(30000, 9), params());
+    expect(polishBudget(small, DEFAULT_OPTIONS)).toBe(DEFAULT_OPTIONS.polishAttempts);
+    expect(polishBudget(big, DEFAULT_OPTIONS)).toBe(3);
+    expect(polishBudget(big, noPolish)).toBe(0);
   });
 });
 

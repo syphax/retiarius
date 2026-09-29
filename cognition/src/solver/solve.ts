@@ -24,6 +24,8 @@ export interface Solution {
   /** True when the winning run was warm-started from the previous solution. */
   warmStarted: boolean;
   runs: number;
+  /** Node relocations the polish pass kept for the winning run (each shows as a jump in playback). */
+  polishMoves: number;
 }
 
 export interface SolveOptions {
@@ -38,6 +40,11 @@ export interface SolveOptions {
    * visually continuous with N. They usually find the same solution; genuine wins are ≥ ~0.5%.
    */
   continuityTolerance: number;
+  /**
+   * After a run converges, try relocating nodes to escape local optima (see `polish`). This is the
+   * most re-runs allowed per polished run; 0 turns polishing off.
+   */
+  polishAttempts: number;
 }
 
 export const DEFAULT_OPTIONS: SolveOptions = {
@@ -46,6 +53,7 @@ export const DEFAULT_OPTIONS: SolveOptions = {
   maxIter: 150,
   tolerance: 2e-5,
   continuityTolerance: 0.0025,
+  polishAttempts: 30,
 };
 
 /** Points closer than this (radians, ~6 mm) count as coincident with the node. */
@@ -163,6 +171,8 @@ interface Run {
   alloc: Int32Array;
   cost: number;
   frames: Frame[];
+  /** Relocations kept by `polish`. */
+  moves?: number;
 }
 
 /** Run location–allocation from a starting set. The first `m.fixed.length` nodes never move. */
@@ -220,6 +230,109 @@ export function locationAllocation(m: Model, start: Vec3[], opts: SolveOptions):
 }
 
 /**
+ * Free nodes ordered by how little they'd be missed: the cost increase if the node were removed
+ * and its demand fell back to each point's second-cheapest node. Cheapest first.
+ */
+function nodesByRemovalCost(m: Model, nodes: Vec3[]): number[] {
+  const nFixed = m.fixed.length;
+  const inbound = nodes.map((n) => inboundPerUnit(m, n));
+  const loss = new Float64Array(nodes.length);
+  for (let i = 0; i < m.demand.length; i++) {
+    let best = 0;
+    let c1 = Infinity;
+    let c2 = Infinity;
+    for (let j = 0; j < nodes.length; j++) {
+      const c = angle(m.demand[i], nodes[j]) + inbound[j];
+      if (c < c1) {
+        c2 = c1;
+        c1 = c;
+        best = j;
+      } else if (c < c2) c2 = c;
+    }
+    if (Number.isFinite(c2)) loss[best] += m.demandWeight[i] * (c2 - c1);
+  }
+  const free = [];
+  for (let j = nFixed; j < nodes.length; j++) free.push(j);
+  return free.sort((a, b) => loss[a] - loss[b]);
+}
+
+/**
+ * Escape local optima the alternating heuristic can't: relocate one free node (least-missed first)
+ * to the worst-served demand point, re-run location–allocation from there, and keep the result if
+ * total cost drops. Repeat until a full pass finds nothing or the attempt budget runs out. Kept
+ * moves are appended to the run's frames, so playback shows the jump and the resettling.
+ */
+export function polish(m: Model, run: Run, opts: SolveOptions): Run {
+  const nFree = run.nodes.length - m.fixed.length;
+  const budget = polishBudget(m, opts);
+  if (budget <= 0 || nFree === 0 || m.demand.length <= run.nodes.length) return run;
+  let best: Run = { ...run, moves: run.moves ?? 0 };
+  let attempts = 0;
+  let improved = true;
+  while (improved && attempts < budget) {
+    improved = false;
+    const targets = worstServed(m, best.nodes, POLISH_TARGETS);
+    search: for (const j of nodesByRemovalCost(m, best.nodes)) {
+      for (const target of targets) {
+        if (attempts >= budget) break search;
+        attempts++;
+        const start = best.nodes.slice();
+        start[j] = m.demand[target];
+        // Short trial first; only a promising move is run to convergence.
+        const trial = locationAllocation(m, start, { ...opts, maxIter: Math.min(opts.maxIter, TRIAL_ITERATIONS) });
+        if (trial.cost < best.cost * (1 - 1e-6)) {
+          const rest = locationAllocation(m, trial.nodes, opts);
+          const r = rest.cost <= trial.cost ? rest : trial;
+          const frames = r === rest ? [...trial.frames, ...rest.frames.slice(1)] : trial.frames;
+          best = { nodes: r.nodes, alloc: r.alloc, cost: r.cost, frames: [...best.frames, ...frames], moves: best.moves! + 1 };
+          improved = true;
+          break search;
+        }
+      }
+    }
+  }
+  return best;
+}
+
+/** Relocation destinations tried per node in `polish`. */
+const POLISH_TARGETS = 3;
+/** Iteration cap for a trial relocation; enough to tell whether the move helps. */
+const TRIAL_ITERATIONS = 40;
+/** Demand points at which the full attempt budget applies; larger datasets get proportionally fewer. */
+const POLISH_FULL_BUDGET_POINTS = 3000;
+
+/**
+ * Attempts scale down with data size: dense data has few bad local optima, and each attempt costs
+ * time proportional to the number of points. Deterministic, so runs stay reproducible.
+ */
+export function polishBudget(m: Model, opts: SolveOptions): number {
+  if (opts.polishAttempts <= 0) return 0;
+  const scale = Math.min(1, POLISH_FULL_BUDGET_POINTS / Math.max(1, m.demand.length));
+  return Math.max(2, Math.round(opts.polishAttempts * scale));
+}
+
+/**
+ * The k demand points with the highest weighted landed cost, skipping points close to one already
+ * picked (so the targets are different places, not one metro area three times).
+ */
+function worstServed(m: Model, nodes: Vec3[], k: number): number[] {
+  const alloc = new Int32Array(m.demand.length);
+  const landed = new Float64Array(m.demand.length);
+  allocateWithCost(m, nodes, alloc, landed);
+  const order = Array.from(m.demand.keys()).sort(
+    (a, b) => m.demandWeight[b] * landed[b] - m.demandWeight[a] * landed[a],
+  );
+  // "Close" = within a quarter of the typical landed distance.
+  const spacing = 0.25 * (landed.reduce((t, x) => t + x, 0) / Math.max(1, landed.length));
+  const picked: number[] = [];
+  for (const i of order) {
+    if (picked.every((p) => angle(m.demand[p], m.demand[i]) > spacing)) picked.push(i);
+    if (picked.length === k) break;
+  }
+  return picked;
+}
+
+/**
  * Add one node by splitting the most expensive cluster: the new node starts at that cluster's
  * worst-served demand point, so N+1 looks like N plus one node.
  */
@@ -254,6 +367,7 @@ function toSolution(m: Model, n: number, run: Run, warmStarted: boolean, runs: n
     frames: run.frames,
     warmStarted,
     runs,
+    polishMoves: run.moves ?? 0,
   };
 }
 
@@ -277,11 +391,14 @@ export function solveN(m: Model, n: number, opts: SolveOptions = DEFAULT_OPTIONS
   for (let r = 0; r < cold; r++) {
     candidates.push({ run: locationAllocation(m, seedNodes(m, n, rand, m.fixed), opts), warm: false });
   }
-  const bestCold = candidates.filter((c) => !c.warm).reduce<(typeof candidates)[number] | undefined>(
+  let bestCold = candidates.filter((c) => !c.warm).reduce<(typeof candidates)[number] | undefined>(
     (a, b) => (!a || b.run.cost < a.run.cost ? b : a),
     undefined,
   );
-  const warmRun = candidates.find((c) => c.warm);
+  let warmRun = candidates.find((c) => c.warm);
+  // Polish the finalists only (not every restart), so warm and cold compete on equal terms.
+  if (warmRun) warmRun = { ...warmRun, run: polish(m, warmRun.run, opts) };
+  if (bestCold) bestCold = { ...bestCold, run: polish(m, bestCold.run, opts) };
   const best =
     warmRun && (!bestCold || bestCold.run.cost >= warmRun.run.cost * (1 - opts.continuityTolerance)) ? warmRun : bestCold!;
   return toSolution(m, n, best.run, best.warm, candidates.length);
