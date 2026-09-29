@@ -163,3 +163,56 @@ describe('sweep', () => {
     expect(re.nodes.filter((n) => n.fixed)).toHaveLength(1);
   });
 });
+
+describe('inbound sourcing blend', () => {
+  // Two coastal ports with equal supply, demand spread across the country.
+  const la: [number, number] = [33.75, -118.2];
+  const ny: [number, number] = [40.7, -74.1];
+  const pts = [...cloud(300, 21), pt('source', ...la, 1), pt('source', ...ny, 1)];
+  const at = (sourcing: number, ratio = 0.4) => buildModel(pts, params({ inboundRatio: ratio, proportionalSourcing: sourcing }));
+
+  it('realized source shares match supply when fully proportional and follow proximity when nearest', () => {
+    const prop = solveN(at(1), 4);
+    expect(prop.metrics.sourceShares[0]).toBeCloseTo(0.5, 9);
+    expect(prop.metrics.sourceShares[1]).toBeCloseTo(0.5, 9);
+    const near = solveN(at(0), 4);
+    const nearestIsLA = (n: { lat: number; lon: number }) => miles([n.lat, n.lon], la) < miles([n.lat, n.lon], ny);
+    const laShare = near.nodes.filter(nearestIsLA).reduce((t, n) => t + n.throughput, 0) / at(0).totalDemand;
+    expect(near.metrics.sourceShares[0]).toBeCloseTo(laShare, 9);
+    expect(near.metrics.sourceShares.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 9);
+  });
+
+  it('blends linearly between the two ends', () => {
+    const blend = solveN(at(0.6), 4);
+    // Each node draws 60% by share (30% / 30%) plus 40% from its nearest port.
+    const nearLA = blend.nodes
+      .filter((n) => miles([n.lat, n.lon], la) < miles([n.lat, n.lon], ny))
+      .reduce((t, n) => t + n.throughput, 0) / at(0.6).totalDemand;
+    expect(blend.metrics.sourceShares[0]).toBeCloseTo(0.3 + 0.4 * nearLA, 9);
+    expect(blend.metrics.sourceShares[1]).toBeCloseTo(0.3 + 0.4 * (1 - nearLA), 9);
+  });
+
+  it('nearest sourcing lowers inbound cost, and inbound falls with N', () => {
+    const prop = sweep(at(1), 1, 6);
+    const near = sweep(at(0), 1, 6);
+    for (let i = 0; i < prop.length; i++) {
+      expect(near[i].metrics.inboundCost).toBeLessThan(prop[i].metrics.inboundCost);
+    }
+    // More nodes can sit nearer their ports (proportional inbound stays roughly flat instead).
+    expect(near.at(-1)!.metrics.inboundCost).toBeLessThan(near[0].metrics.inboundCost);
+  });
+
+  it('with dominant inbound cost, 2 nodes sit on the 2 ports when nearest, but not when proportional', () => {
+    const onPorts = (s: ReturnType<typeof solveN>) =>
+      [la, ny].every((port) => s.nodes.some((n) => miles([n.lat, n.lon], port) < 5));
+    expect(onPorts(solveN(at(0, 5), 2))).toBe(true);
+    expect(onPorts(solveN(at(1, 5), 2))).toBe(false);
+  });
+
+  it('is identical to the old model at 100% (the default)', () => {
+    const a = solveN(buildModel(pts, params()), 3);
+    const b = solveN(at(1), 3);
+    expect(b.metrics.totalCost).toBe(a.metrics.totalCost);
+  });
+});
+

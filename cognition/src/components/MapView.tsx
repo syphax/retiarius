@@ -81,12 +81,10 @@ export default function MapView({ points: currentPoints, showFixed: showFixedPar
 
   const sourceArcs: SourceArc[] = [];
   if (view && display.sourceLines) {
-    for (const { point, share } of view.sources) {
-      for (const n of nodes) {
-        if (n.throughput > 0) {
-          sourceArcs.push({ path: greatCirclePath(point.lat, point.lon, n.lat, n.lon), volume: share * n.throughput });
-        }
-      }
+    for (const { k, j, volume } of view.arcs) {
+      const { point } = view.sources[k];
+      const n = nodes[j];
+      sourceArcs.push({ path: greatCirclePath(point.lat, point.lon, n.lat, n.lon), volume });
     }
   }
   const maxArc = Math.max(1, ...sourceArcs.map((a) => a.volume));
@@ -148,19 +146,6 @@ export default function MapView({ points: currentPoints, showFixed: showFixedPar
       getLineWidth: 2,
     }),
     new ScatterplotLayer<Point>({
-      id: 'sources',
-      data: points.filter((p) => p.type === 'source'),
-      getPosition: (p) => [p.lon, p.lat],
-      getRadius: 9,
-      radiusUnits: 'pixels',
-      getFillColor: [...POINT_COLORS.source, 230],
-      stroked: true,
-      getLineColor: [255, 255, 255],
-      lineWidthUnits: 'pixels',
-      getLineWidth: 1.5,
-      pickable: true,
-    }),
-    new ScatterplotLayer<Point>({
       id: 'fixed',
       data: showFixed ? points.filter((p) => p.type === 'fixed') : [],
       getPosition: (p) => [p.lon, p.lat],
@@ -186,6 +171,20 @@ export default function MapView({ points: currentPoints, showFixed: showFixedPar
       getLineWidth: (n) => (n.fixed ? 4 : 2),
       pickable: true,
     }),
+    new ScatterplotLayer<Point>({
+      id: 'sources',
+      data: points.filter((p) => p.type === 'source'),
+      getPosition: (p) => [p.lon, p.lat],
+      // Drawn above nodes so a node sitting on a source doesn't hide it.
+      getRadius: 7,
+      radiusUnits: 'pixels',
+      getFillColor: [...POINT_COLORS.source, 230],
+      stroked: true,
+      getLineColor: [255, 255, 255],
+      lineWidthUnits: 'pixels',
+      getLineWidth: 1.5,
+      pickable: true,
+    }),
   ];
 
   return (
@@ -201,6 +200,14 @@ export default function MapView({ points: currentPoints, showFixed: showFixedPar
             return `${n.fixed ? 'Fixed node' : 'Node'}\nThroughput: ${Math.round(n.throughput).toLocaleString()}\n${n.lat.toFixed(3)}, ${n.lon.toFixed(3)}`;
           }
           const p = object as Point;
+          if (p.type === 'source' && view) {
+            const k = view.sources.findIndex((s) => s.point === p);
+            if (k >= 0) {
+              const realized = Math.round(view.metrics.sourceShares[k] * 100);
+              const stated = Math.round(view.sources[k].share * 100);
+              return `Source\nSupplies ${realized}% of inbound (stated ${stated}%)\n${p.lat.toFixed(3)}, ${p.lon.toFixed(3)}`;
+            }
+          }
           const vol = p.type === 'fixed' ? '' : `\nVolume: ${p.volume.toLocaleString()}`;
           const rows = p.rows.length > 1 ? `\n${p.rows.length} rows aggregated` : '';
           return `${p.type[0].toUpperCase() + p.type.slice(1)}${vol}\n${p.lat.toFixed(3)}, ${p.lon.toFixed(3)}${rows}`;

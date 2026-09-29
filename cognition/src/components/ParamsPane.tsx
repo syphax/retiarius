@@ -119,6 +119,36 @@ export default function ParamsPane({ params, onChange, validation, running, stal
           step={0.05}
           onChange={(v) => set('inboundRatio', v)}
         />
+        <div
+          className={`field slider-field${counts.source === 0 ? ' disabled' : ''}`}
+          title={
+            'Where each node gets its inbound supply.\n' +
+            'All sources: every node draws from every source in proportion to supply (dedicated sources, e.g. factories making different products).\n' +
+            'Nearest source: each node draws from its closest source (interchangeable sources, e.g. import ports). Source volumes are not treated as capacities.'
+          }
+        >
+          <span>Inbound sourcing</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            disabled={counts.source === 0}
+            value={Math.round(params.proportionalSourcing * 100)}
+            onChange={(e) => set('proportionalSourcing', e.target.valueAsNumber / 100)}
+          />
+          <div className="slider-ends">
+            <span>Nearest source</span>
+            <span>All sources</span>
+          </div>
+          <small className="hint">
+            {params.proportionalSourcing >= 1
+              ? '100% from all sources, by supply share'
+              : params.proportionalSourcing <= 0
+                ? '100% from the nearest source'
+                : `${Math.round(params.proportionalSourcing * 100)}% from all sources · ${Math.round((1 - params.proportionalSourcing) * 100)}% from nearest`}
+          </small>
+        </div>
         {counts.source === 0 && <p className="hint">No sources in the data, so inbound cost is ignored.</p>}
         <NumberField
           label="Service distance"

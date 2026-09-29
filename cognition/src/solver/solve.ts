@@ -1,4 +1,4 @@
-import { evaluate, inboundPerUnit, type Metrics, type Model, type NodeStats } from './model';
+import { evaluate, inboundPerUnit, sourceMix, type Metrics, type Model, type NodeStats } from './model';
 import { angle, normalize, toLatLon, toVec, type Vec3 } from './sphere';
 
 /**
@@ -199,9 +199,12 @@ export function locationAllocation(m: Model, start: Vec3[], opts: SolveOptions):
         }
         continue;
       }
-      // Sources pull on the node in proportion to its throughput.
-      for (let k = 0; k < m.sources.length; k++) {
-        acc[j].add(m.sources[k], m.inboundRatio * throughput[j] * m.sourceShare[k], nodes[j]);
+      // Sources pull on the node in proportion to its throughput and how much it draws from each.
+      if (m.inboundRatio > 0) {
+        const mix = sourceMix(m, nodes[j]);
+        for (let k = 0; k < m.sources.length; k++) {
+          acc[j].add(m.sources[k], m.inboundRatio * throughput[j] * mix[k], nodes[j]);
+        }
       }
       next[j] = acc[j].step(nodes[j]);
     }

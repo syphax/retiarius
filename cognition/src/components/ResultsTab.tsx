@@ -148,9 +148,15 @@ export default function ResultsTab({ runs, activeId, onShowOnMap, onToggleChart,
   );
 }
 
+/** Realized source shares, e.g. "72 / 18 / 10 / 0". */
+const sharesText = (shares: number[]) => shares.map((x) => Math.round(x * 100)).join(' / ');
+
 function SweepTable({ run, onShowOnMap }: { run: Run; onShowOnMap: (runId: number, n: number) => void }) {
   const units = run.params.units;
   const first = run.solutions[0];
+  const sources = run.points.filter((p) => p.type === 'source');
+  const total = sources.reduce((t, p) => t + p.volume, 0);
+  const stated = sources.map((p) => p.volume / total);
   return (
     <table className="results-table">
       <thead>
@@ -164,6 +170,12 @@ function SweepTable({ run, onShowOnMap }: { run: Run; onShowOnMap: (runId: numbe
           <th>
             Within {run.params.serviceDistance} {units}
           </th>
+          {sources.length > 1 && (
+            <th title={`Share of inbound from each source, in data order. Stated: ${sharesText(stated)}%`}>
+              Source shares %<br />
+              <small className="muted">stated {sharesText(stated)}</small>
+            </th>
+          )}
           <th>Start</th>
           <th />
         </tr>
@@ -178,6 +190,7 @@ function SweepTable({ run, onShowOnMap }: { run: Run; onShowOnMap: (runId: numbe
             <td>{fmtCost(s.metrics.outboundCost)}</td>
             <td>{fmtDist(s.metrics.avgDistance, units)}</td>
             <td>{fmtPct(s.metrics.pctWithin)}</td>
+            {sources.length > 1 && <td>{sharesText(s.metrics.sourceShares)}</td>}
             <td className="muted">{s.warmStarted ? `warm (best of ${s.runs})` : `cold (best of ${s.runs})`}</td>
             <td>
               <button onClick={() => onShowOnMap(run.id, s.n)}>Map</button>

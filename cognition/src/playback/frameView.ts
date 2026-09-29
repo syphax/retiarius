@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Point } from '../data/types';
-import { allocate, evaluate, type Metrics, type Model } from '../solver/model';
+import { allocate, evaluate, sourceMix, type Metrics, type Model } from '../solver/model';
 import type { Solution } from '../solver/solve';
 import { toVec } from '../solver/sphere';
 
@@ -18,8 +18,10 @@ export interface FrameView {
   points: Point[];
   /** Demand points in model order (aligned with `alloc`). */
   demand: Point[];
-  /** Sources in model order, with their share of supply. */
+  /** Sources in model order, with their stated share of supply. */
   sources: { point: Point; share: number }[];
+  /** Inbound flows for the source arcs: volume from source k to node j. */
+  arcs: { k: number; j: number; volume: number }[];
   alloc: Int32Array;
   nodes: NodeView[];
   /** Per node, [lon, lat] positions from the start of the search to now. */
@@ -82,7 +84,15 @@ export function buildFrameView(
     return path;
   });
 
-  return { points, demand, sources, alloc, nodes, trails, metrics, iteration: i, iterations: last };
+  const arcs: FrameView['arcs'] = [];
+  nodes.forEach((n) => {
+    if (n.throughput <= 0 || model.inboundRatio === 0) return;
+    sourceMix(model, toVec(n.lat, n.lon)).forEach((f, k) => {
+      if (f > 1e-9) arcs.push({ k, j: n.j, volume: f * n.throughput });
+    });
+  });
+
+  return { points, demand, sources, arcs, alloc, nodes, trails, metrics, iteration: i, iterations: last };
 }
 
 export function useFrameView(

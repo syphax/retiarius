@@ -16,6 +16,8 @@ export interface Model {
   sourceShare: Float64Array;
   /** Inbound cost per unit-distance relative to outbound; 0 when there are no sources. */
   inboundRatio: number;
+  /** Share of inbound drawn from all sources by supply share; the rest comes from the nearest source. */
+  proportional: number;
   fixed: Vec3[];
   distScale: number;
   serviceDistance: number;
@@ -34,17 +36,36 @@ export function buildModel(points: Point[], params: Params): Model {
     sources: sourcePts.map((p) => toVec(p.lat, p.lon)),
     sourceShare: Float64Array.from(sourcePts, (p) => p.volume / totalSupply),
     inboundRatio: sourcePts.length ? params.inboundRatio : 0,
+    proportional: Math.min(1, Math.max(0, params.proportionalSourcing ?? 1)),
     fixed: fixedPts.map((p) => toVec(p.lat, p.lon)),
     distScale: EARTH_RADIUS[params.units] * params.circuity,
     serviceDistance: params.serviceDistance,
   };
 }
 
+/**
+ * Where a node's inbound comes from: the fraction of its volume from each source (sums to 1).
+ * Proportional part by supply share, the rest from the nearest source. Source volumes are not
+ * capacities, so a nearby source can supply more than its stated share.
+ */
+export function sourceMix(m: Model, node: Vec3, dist?: Float64Array): Float64Array {
+  const S = m.sources.length;
+  const d = dist ?? Float64Array.from(m.sources, (s) => angle(s, node));
+  let nearest = 0;
+  for (let k = 1; k < S; k++) if (d[k] < d[nearest]) nearest = k;
+  const mix = new Float64Array(S);
+  for (let k = 0; k < S; k++) mix[k] = m.proportional * m.sourceShare[k];
+  if (S) mix[nearest] += 1 - m.proportional;
+  return mix;
+}
+
 /** Inbound cost per unit of throughput at a node location (in angle units, already × ratio). */
 export function inboundPerUnit(m: Model, node: Vec3): number {
   if (m.inboundRatio === 0) return 0;
+  const d = Float64Array.from(m.sources, (s) => angle(s, node));
+  const mix = sourceMix(m, node, d);
   let s = 0;
-  for (let k = 0; k < m.sources.length; k++) s += m.sourceShare[k] * angle(m.sources[k], node);
+  for (let k = 0; k < d.length; k++) s += mix[k] * d[k];
   return m.inboundRatio * s;
 }
 
@@ -86,6 +107,8 @@ export interface Metrics {
   avgDistance: number;
   /** Share of demand volume within the service distance (0–1). */
   pctWithin: number;
+  /** Realized share of inbound volume from each source (same order as the source points). */
+  sourceShares: number[];
 }
 
 /** Cost and service metrics, in the user's units. */
@@ -103,10 +126,12 @@ export function evaluate(m: Model, nodes: Vec3[], alloc: Int32Array): { metrics:
     if (d <= m.serviceDistance) within += w;
   }
   let inbound = 0;
+  const sourceVolume = new Array<number>(m.sources.length).fill(0);
   nodes.forEach((n, j) => {
     const c = perNode[j].throughput * inboundPerUnit(m, n) * m.distScale;
     perNode[j].inboundCost = c;
     inbound += c;
+    sourceMix(m, n).forEach((f, k) => (sourceVolume[k] += f * perNode[j].throughput));
   });
   const total = m.totalDemand || 1;
   return {
@@ -116,6 +141,7 @@ export function evaluate(m: Model, nodes: Vec3[], alloc: Int32Array): { metrics:
       inboundCost: inbound,
       avgDistance: outbound / total,
       pctWithin: within / total,
+      sourceShares: sourceVolume.map((v) => v / total),
     },
     perNode,
   };
