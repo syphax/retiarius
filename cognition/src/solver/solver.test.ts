@@ -209,8 +209,8 @@ describe('inbound sourcing blend', () => {
     expect(onPorts(solveN(at(1, 5), 2))).toBe(false);
   });
 
-  it('is identical to the old model at 100% (the default)', () => {
-    const a = solveN(buildModel(pts, params()), 3);
+  it('is identical to the old model at 100%', () => {
+    const a = solveN(buildModel(pts, params({ inboundRatio: 0.4, proportionalSourcing: 1 })), 3);
     const b = solveN(at(1), 3);
     expect(b.metrics.totalCost).toBe(a.metrics.totalCost);
   });

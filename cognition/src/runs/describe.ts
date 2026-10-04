@@ -3,7 +3,7 @@ import type { Params } from '../params';
 /** Short scenario description, e.g. "brownfield (2 fixed) · in:out 0.4 · sourcing 60%". */
 export function describeScenario(params: Params, fixedCount: number): string {
   const field = params.useFixedNodes && fixedCount > 0 ? `brownfield (${fixedCount} fixed)` : 'greenfield';
-  const sourcing = params.proportionalSourcing < 1 ? ` · sourcing ${pct(params.proportionalSourcing)}` : '';
+  const sourcing = params.proportionalSourcing > 0 ? ` · sourcing ${pct(params.proportionalSourcing)}` : '';
   return `${field} · in:out ${params.inboundRatio}${sourcing}`;
 }
 
