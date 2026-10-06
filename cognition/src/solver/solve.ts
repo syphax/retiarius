@@ -11,6 +11,8 @@ export interface Frame {
   /** [lat, lon] per node; fixed nodes first. */
   nodes: [number, number][];
   totalCost: number;
+  /** First frame of a polish relocation: a node jumped rather than moved by a solver step. */
+  jump?: boolean;
 }
 
 export interface Solution {
@@ -283,7 +285,8 @@ export function polish(m: Model, run: Run, opts: SolveOptions): Run {
         if (trial.cost < best.cost * (1 - 1e-6)) {
           const rest = locationAllocation(m, trial.nodes, opts);
           const r = rest.cost <= trial.cost ? rest : trial;
-          const frames = r === rest ? [...trial.frames, ...rest.frames.slice(1)] : trial.frames;
+          const frames = r === rest ? [...trial.frames, ...rest.frames.slice(1)] : trial.frames.slice();
+          frames[0] = { ...frames[0], jump: true };
           best = { nodes: r.nodes, alloc: r.alloc, cost: r.cost, frames: [...best.frames, ...frames], moves: best.moves! + 1 };
           improved = true;
           break search;

@@ -100,6 +100,7 @@ export default function App() {
             />
             <SolutionBar
               run={active}
+              solution={selected}
               view={view}
               player={player}
               display={display}

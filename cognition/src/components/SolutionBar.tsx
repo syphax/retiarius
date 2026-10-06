@@ -1,11 +1,15 @@
 import type { FrameView } from '../playback/frameView';
 import type { usePlayback } from '../playback/usePlayback';
 import type { Run } from '../runs/useRuns';
+import type { Solution } from '../solver/solve';
 import { fmtCost, fmtDist, fmtPct } from '../utils/format';
+import CostChart from './CostChart';
 import type { DisplayOptions } from './MapView';
 
 interface Props {
   run: Run | undefined;
+  /** The N being shown. */
+  solution: Solution | undefined;
   view: FrameView | null;
   player: ReturnType<typeof usePlayback>;
   display: DisplayOptions;
@@ -15,8 +19,8 @@ interface Props {
 
 const SPEEDS = [0.5, 1, 2, 4];
 
-/** Bottom strip on the map: pick N, play the search, toggle layers, see metrics. */
-export default function SolutionBar({ run, view, player, display, onDisplay, onCancel }: Props) {
+/** Bottom strip on the map: pick N, play the search, toggle layers, see metrics and the cost curve. */
+export default function SolutionBar({ run, solution, view, player, display, onDisplay, onCancel }: Props) {
   if (!run) return null;
   const { playback } = player;
   const units = run.params.units;
@@ -119,6 +123,8 @@ export default function SolutionBar({ run, view, player, display, onDisplay, onC
           </span>
         </div>
       )}
+
+      {view && solution && <CostChart frames={solution.frames} t={playback.t} onSeek={player.scrub} />}
     </div>
   );
 }
