@@ -21,7 +21,7 @@ export interface Params {
 
 export const DEFAULT_PARAMS: Params = {
   minNodes: 1,
-  maxNodes: 8,
+  maxNodes: 10,
   inboundRatio: 0.2,
   proportionalSourcing: 0,
   serviceDistance: 300,

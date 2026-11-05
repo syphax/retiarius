@@ -56,12 +56,15 @@ export async function parseFile(file: File): Promise<RawRow[]> {
   return parseText(await file.text());
 }
 
-/** Build the CSV export URL for a Google Sheets link. Keeps the tab (gid) if the link has one. */
+/**
+ * Build the CSV URL for a Google Sheets link. Keeps the tab (gid) if the link has one.
+ * Uses gviz/tq rather than /export: /export redirects to googleusercontent.com, which returns 400 to CORS requests.
+ */
 export function sheetsCsvUrl(link: string): string {
   const id = link.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/)?.[1];
   if (!id) throw new ImportError('That does not look like a Google Sheets link.');
   const gid = link.match(/[#&?]gid=(\d+)/)?.[1] ?? '0';
-  return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+  return `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&gid=${gid}`;
 }
 
 export async function fetchSheet(link: string): Promise<RawRow[]> {

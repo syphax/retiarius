@@ -50,7 +50,7 @@ describe('parse', () => {
 
   it('builds a Sheets CSV URL that keeps the tab', () => {
     expect(sheetsCsvUrl('https://docs.google.com/spreadsheets/d/abc_123/edit#gid=42')).toBe(
-      'https://docs.google.com/spreadsheets/d/abc_123/export?format=csv&gid=42',
+      'https://docs.google.com/spreadsheets/d/abc_123/gviz/tq?tqx=out:csv&gid=42',
     );
     expect(() => sheetsCsvUrl('https://example.com')).toThrow(ImportError);
   });
